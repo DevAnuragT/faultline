@@ -1,7 +1,7 @@
 {
   "variant": "no_preview_fetch",
   "description": "Remove the outbound HTTP call from /preview",
-  "recorded_at": 1792072871,
+  "recorded_at": 1792075925,
   "baseline_snapshot": "6065fe457b7c6225",
   "variant_snapshot": "1aff83635c123288",
   "flips": [
