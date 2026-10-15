@@ -34,7 +34,8 @@ def path_graph(s: Store, finding_ids: list[str], height: str = "430px") -> str:
     net = Network(height=height, width="100%", directed=True, bgcolor="#0e1117", font_color="#e6e6e6",
                   cdn_resources="in_line")
     net.set_options('{"layout":{"hierarchical":{"enabled":true,"direction":"LR","sortMethod":"directed",'
-                    '"levelSeparation":190,"nodeSpacing":90}},"physics":{"enabled":false}}')
+                    '"levelSeparation":120,"nodeSpacing":60}},"physics":{"enabled":false},'
+                    '"nodes":{"font":{"size":20,"color":"#e6e6e6"},"margin":10},"edges":{"width":2,"arrows":{"to":{"scaleFactor":0.8}}}}')
     seen: set[str] = set()
     for fid in finding_ids:
         vuln = s.q("MATCH (f:Finding {id:$id})-[:FOR]->(v:Vuln) RETURN v.id, v.package", {"id": fid})[0]
@@ -50,11 +51,11 @@ def path_graph(s: Store, finding_ids: list[str], height: str = "430px") -> str:
             prev = eid
         for i, (step, q, layer, via) in enumerate(ev):
             last = i == len(ev) - 1
-            label = q.split(".", 1)[1] if layer == "dep" and "." in q else q
+            parts = q.split(".")
+            label = "\n".join(parts[-2:]) if len(parts) > 1 else q
             if q not in seen:
                 color = "#da3633" if last else ("#1f6feb" if layer == "app" else "#6e7681")
-                net.add_node(q, label=label.replace(".", "\n", 1) if len(label) > 26 else label, color=color,
-                             shape="box", title=q)
+                net.add_node(q, label=label, color=color, shape="box", title=q)
                 seen.add(q)
             if prev:
                 net.add_edge(prev, q, dashes=(via not in ("CALLS", "ENTRY")),
@@ -66,7 +67,10 @@ def path_graph(s: Store, finding_ids: list[str], height: str = "430px") -> str:
             seen.add(vnode)
         if prev:
             net.add_edge(prev, vnode, title="VULNERABLE_SYMBOL", color="#f85149")
-    return net.generate_html()
+    html = net.generate_html()
+    dark = "<style>html,body{background:#0e1117;margin:0}.card{border:0!important;background:#0e1117!important}" \
+           "#mynetwork{border:0!important}</style></head>"
+    return html.replace("</head>", dark, 1)
 
 
 def verdict_table(findings: list[dict]) -> pd.DataFrame:
