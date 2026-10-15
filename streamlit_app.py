@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from pyvis.network import Network
 
 from reachable import actions, analysis, config, ingest
@@ -99,7 +98,7 @@ def main() -> None:
         st.divider()
         st.subheader("What-if: change the code")
         variant = st.radio("App version", list(ingest.VARIANTS), format_func=lambda k: ingest.VARIANTS[k]["label"])
-        if st.button("Re-ingest app code & re-triage", use_container_width=True):
+        if st.button("Re-ingest app code & re-triage", width="stretch"):
             with st.spinner("Rewriting the app layer of the graph..."):
                 before = {f["vuln"]: f["verdict"] for f in findings}
                 ingest.reload_app_layer(s, variant)
@@ -107,7 +106,7 @@ def main() -> None:
                 st.session_state.diff = {f["vuln"]: (before[f["vuln"]], f["verdict"])
                                          for f in analysis.latest_findings(s) if before.get(f["vuln"]) != f["verdict"]}
             st.rerun()
-        if st.button("Rebuild everything from scratch", use_container_width=True):
+        if st.button("Rebuild everything from scratch", width="stretch"):
             s.reset()
             st.rerun()
 
@@ -129,7 +128,7 @@ def main() -> None:
         with left:
             show = st.multiselect("Filter", list(VERDICT_STYLE), default=["REACHABLE", "POSSIBLY_REACHABLE", "NEEDS_REVIEW"])
             view = [f for f in findings if f["verdict"] in show]
-            st.dataframe(verdict_table(view), hide_index=True, use_container_width=True, height=360)
+            st.dataframe(verdict_table(view), hide_index=True, width="stretch", height=360)
             choice = st.selectbox("Inspect advisory", [f["vuln"] for f in view] or [""])
         with right:
             f = next((x for x in findings if x["vuln"] == choice), None)
@@ -141,22 +140,22 @@ def main() -> None:
                            f"{f['symbol_rationale']}" + (f"  \n[fix commit]({f['patch_url']})" if f["patch_url"] else ""))
                 path = analysis.witness_path(s, f["finding"])
                 if path:
-                    components.html(path_graph(s, [f["finding"]]), height=450)
+                    st.iframe(path_graph(s, [f["finding"]]), height=450)
                     with st.expander("Witness path (stored as EVIDENCE edges)"):
-                        st.dataframe(pd.DataFrame(path), hide_index=True, use_container_width=True)
+                        st.dataframe(pd.DataFrame(path), hide_index=True, width="stretch")
         st.subheader("Where to fix first")
         c1, c2 = st.columns(2)
         gp = analysis.guard_points(s, run_id)
         up = analysis.upgrade_plan(s, run_id)
         c1.markdown("**Guard points**: app functions on the most exposed paths")
-        c1.dataframe(pd.DataFrame(gp), hide_index=True, use_container_width=True)
+        c1.dataframe(pd.DataFrame(gp), hide_index=True, width="stretch")
         c2.markdown("**Upgrade leverage**: one version bump, how many exposed advisories it clears")
         c2.dataframe(pd.DataFrame(up).drop(columns=["advisories"]) if up else pd.DataFrame(), hide_index=True,
-                     use_container_width=True)
+                     width="stretch")
         exposed = [f["finding"] for f in findings if f["verdict"] in ("REACHABLE", "POSSIBLY_REACHABLE")]
         if exposed:
             st.subheader("Exposure map: every exposed path")
-            components.html(path_graph(s, exposed, "520px"), height=540)
+            st.iframe(path_graph(s, exposed, "520px"), height=540)
 
     with tab_agent:
         st.caption("Gemini calls graph tools (explain_finding, recommend_fixes, query_graph, ...). It can propose actions; you approve them.")
