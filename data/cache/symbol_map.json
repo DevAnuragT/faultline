@@ -1,0 +1,176 @@
+{
+ "GHSA-2xpw-w6gg-jr37": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/c19571de34c47de3a766541b041637ba5f716ed7",
+  "rationale": "Highest-scoring changed function in the fix commit (score 33); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.response.GzipDecoder.decompress"
+  ]
+ },
+ "GHSA-34jh-p97f-mpxf": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "Fix commit does not touch functions in the analyzed release",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-38jv-5279-wg99": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/8864ac407bba8607950025e0979c4c69bc7abc7b",
+  "rationale": "Highest-scoring changed function in the fix commit (score 4); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.response.HTTPResponse.drain_conn"
+  ]
+ },
+ "GHSA-8988-9cw3-xx77": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/07408cec79d1856d81bb42c74a904a24fdb9e465",
+  "rationale": "Highest-scoring changed function in the fix commit (score 29); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.connection.HTTPSConnection._connect_tls_proxy"
+  ]
+ },
+ "GHSA-9hjg-9r4m-mvj7": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/psf/requests/commit/96ba401c1296ab1dda74a2365ef36d88f7d144ef",
+  "rationale": "Highest-scoring changed function in the fix commit (score 14); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "requests.utils.get_netrc_auth"
+  ]
+ },
+ "GHSA-9wx4-h78v-vm56": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/psf/requests/commit/a58d7f2ffb4d00b46dca2d70a3932a0b37e22fac",
+  "rationale": "Highest-scoring changed function in the fix commit (score 5); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "requests.adapters.HTTPAdapter.send"
+  ]
+ },
+ "GHSA-cpwx-vrp4-4pq7": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/jinja/commit/90457bbf33b8662926ae65cdde4c4c32e756e403",
+  "rationale": "Highest-scoring changed function in the fix commit (score 42); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "jinja2.filters.do_attr"
+  ]
+ },
+ "GHSA-g4mx-q9vg-27p4": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/4e50fbc5db74e32cabd5ccc1ab81fc103adfe0b3",
+  "rationale": "Highest-scoring changed function in the fix commit (score 9); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.poolmanager.PoolManager.urlopen"
+  ]
+ },
+ "GHSA-gc5v-m9x4-r6x2": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/psf/requests/commit/66d21cb07bd6255b1280291c4fafb71803cdb3b7",
+  "rationale": "Highest-scoring changed function in the fix commit (score 8); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "requests.utils.extract_zipped_paths"
+  ]
+ },
+ "GHSA-gm62-xv2j-4w53": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/24d7b67eac89f94e11003424bcf0d8f7b72222a8",
+  "rationale": "Highest-scoring changed function in the fix commit (score 3); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.response.MultiDecoder.__init__"
+  ]
+ },
+ "GHSA-gmj6-6f8f-6699": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/jinja/commit/767b23617628419ae3709ccfb02f9602ae9fe51f",
+  "rationale": "Highest-scoring changed function in the fix commit (score 8); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "jinja2.compiler.CodeGenerator.visit_FromImport"
+  ]
+ },
+ "GHSA-h5c8-rqwp-cp95": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/jinja/commit/716795349a41d4983a9a4771f7d883c96ea17be7",
+  "rationale": "Highest-scoring changed function in the fix commit (score 26); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "jinja2.filters.do_xmlattr"
+  ]
+ },
+ "GHSA-h75v-3vvj-5mfj": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/jinja/commit/0668239dc6b44ef38e7a6c9f91f312fd4ca581cb",
+  "rationale": "Highest-scoring changed function in the fix commit (score 4); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "jinja2.filters.do_xmlattr"
+  ]
+ },
+ "GHSA-j8r2-6x86-q33q": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/psf/requests/commit/74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5",
+  "rationale": "Highest-scoring changed function in the fix commit (score 6); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "requests.sessions.SessionRedirectMixin.rebuild_proxies"
+  ]
+ },
+ "GHSA-pq67-6m6q-mj2v": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/f05b1329126d5be6de501f9d1e3e36738bc08857",
+  "rationale": "Highest-scoring changed function in the fix commit (score 5); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.poolmanager.PoolManager.urlopen"
+  ]
+ },
+ "GHSA-q2q7-5pp4-w6pg": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/2d4a3fee6de2fa45eb82169361918f759269b4ec",
+  "rationale": "Highest-scoring changed function in the fix commit (score 8); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.util.url.parse_url"
+  ]
+ },
+ "GHSA-q2x7-8rv6-6q7h": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/jinja/commit/48b0687e05a5466a91cd5812d604fa37ad0943b4",
+  "rationale": "Highest-scoring changed function in the fix commit (score 56); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "jinja2.sandbox.SandboxedEnvironment.format_string"
+  ]
+ },
+ "GHSA-qccp-gfcp-xxvc": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-v845-jxx5-vc9f": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "Fix commit does not touch functions in the analyzed release",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-vxq7-64xx-v4gw": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/cd770b059b543be29298ea5c52afb0b1b090f5ed",
+  "rationale": "Highest-scoring changed function in the fix commit (score 7); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "urllib3.response.HTTPResponse._update_chunk_length"
+  ]
+ }
+}

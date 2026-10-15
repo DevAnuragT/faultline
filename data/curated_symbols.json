@@ -1,0 +1,7 @@
+{
+  "GHSA-8q59-q68h-6hv4": {
+    "symbols": ["yaml.constructor.FullConstructor.construct_python_object_new"],
+    "confidence": 0.9,
+    "rationale": "CVE-2020-14343: FullLoader registered python/object/new (and object/module) constructors, letting yaml.full_load build arbitrary objects. The fix un-registers these from FullConstructor. Human-reviewed against the fix commit."
+  }
+}

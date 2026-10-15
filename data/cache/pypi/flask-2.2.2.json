@@ -1,0 +1,1 @@
+["Werkzeug (>=2.2.2)", "Jinja2 (>=3.0)", "itsdangerous (>=2.0)", "click (>=8.0)", "importlib-metadata (>=3.6.0) ; python_version < \"3.10\"", "asgiref (>=3.2) ; extra == 'async'", "python-dotenv ; extra == 'dotenv'"]

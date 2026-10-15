@@ -1,0 +1,5 @@
+# Module ownership (used by the agent to route findings to the right team)
+vulnshop/settings_loader.py  @vulnshop/platform
+vulnshop/preview.py          @vulnshop/growth
+vulnshop/greeting.py         @vulnshop/growth
+vulnshop/app.py              @vulnshop/platform
