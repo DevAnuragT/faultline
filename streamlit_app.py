@@ -1,11 +1,13 @@
 """Reachable: graph-proven vulnerability triage. Run: streamlit run streamlit_app.py"""
 from __future__ import annotations
 
+import time
+
 import pandas as pd
 import streamlit as st
 from pyvis.network import Network
 
-from reachable import actions, analysis, config, ingest
+from reachable import actions, analysis, config, frozen, ingest, planner, verify
 from reachable.agent import Agent
 from reachable.graph import Store
 
@@ -73,6 +75,52 @@ def path_graph(s: Store, finding_ids: list[str], height: str = "600px") -> str:
     return html.replace("</head>", dark, 1)
 
 
+GATE_ICON = {True: "✅", False: "❌"}
+STATUS_STYLE = {"VERIFIED": ("success", "✅ VERIFIED"), "REJECTED": ("error", "⛔ REJECTED"), "UNVERIFIED": ("warning", "⚠️ UNVERIFIED")}
+
+
+def render_fix_tab(s: Store, public: bool) -> None:
+    st.caption("The agent plans a compatible upgrade, rebuilds the graph with the candidate versions in a private scratch "
+               "graph, re-triages, and only a VERIFIED result can become a pull request. Say 'graph-checked', not 'secure'.")
+    rem = verify.latest_remediation(s)
+    if not public:
+        c1, c2 = st.columns(2)
+        if c1.button("Plan & verify a fix (builds a scratch graph)", width="stretch"):
+            with st.status("Planning and verifying...", expanded=True) as status:
+                verify.run_closed_loop(s, progress=status.write)
+            st.rerun()
+        if rem and rem["status"] == "VERIFIED" and c2.button("Propose draft PR", width="stretch"):
+            st.session_state.pr_msg = actions.propose_fix_pr(s)
+            st.rerun()
+        if st.session_state.get("pr_msg"):
+            m = st.session_state.pr_msg
+            (st.success if m["ok"] else st.error)(f"Proposed `{m.get('action')}`: approve it in the Actions tab." if m["ok"] else m["error"])
+    if not rem:
+        st.info("No remediation checked yet." + ("" if public else " Click the button above."))
+        return
+    kind, label = STATUS_STYLE[rem["status"]]
+    getattr(st, kind)(f"{label}  ·  remediation `{rem['id']}`")
+    if public:
+        st.caption(f"Read-only demo: showing the operator's recorded run (baseline snapshot `{rem['baseline_snapshot']}` → "
+                   f"candidate `{rem['candidate_snapshot']}`, recorded {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(rem['ts']))}).")
+    for r in rem["plan"]["rejected"]:
+        st.warning(f"**The graph rejected the naive plan:** {r['reason']}.  \n**Resolution:** {r['resolution']}.")
+    a, b, c = st.columns(3)
+    exp_b = rem["before"].get("REACHABLE", 0) + rem["before"].get("POSSIBLY_REACHABLE", 0)
+    exp_a = rem["after"].get("REACHABLE", 0) + rem["after"].get("POSSIBLY_REACHABLE", 0)
+    a.metric("Exposed advisories", f"{exp_b} → {exp_a}")
+    b.metric("Cleared", len(rem["cleared"]))
+    c.metric("New exposure", len(rem["new_exposed"]))
+    st.markdown("**Gates**")
+    st.dataframe(pd.DataFrame([{"": GATE_ICON[g["passed"]], "Gate": g["name"], "Detail": g["detail"]} for g in rem["gates"]]),
+                 hide_index=True, width="stretch")
+    st.markdown("**Changes**")
+    st.dataframe(pd.DataFrame(rem["plan"]["changes"]), hide_index=True, width="stretch")
+    st.code(rem["requirements_diff"], language="diff")
+    with st.expander("Verdicts before / after"):
+        st.json({"before": rem["before"], "after": rem["after"], "cleared": rem["cleared"]})
+
+
 def verdict_table(findings: list[dict]) -> pd.DataFrame:
     return pd.DataFrame([{"": VERDICT_STYLE[f["verdict"]], "Verdict": f["verdict"], "Package": f"{f['package']} {f['version']}",
                           "Advisory": f["vuln"], "CVE": f["cve"] or "", "Severity": f["severity"],
@@ -100,25 +148,36 @@ def main() -> None:
 
     findings = analysis.latest_findings(s)
     run_id = findings[0]["run"]
+    PUBLIC = config.PUBLIC_MODE
 
     with st.sidebar:
         st.title("🕸️ Reachable")
         st.caption("Which of your CVEs can actually be reached? Proven with graph paths in FalkorDB.")
         st.markdown(f"**Run:** `{findings[0]['label']}`  \n**Gemini:** {'on' if st.session_state.agent.live else 'off (offline mode)'}")
         st.divider()
-        st.subheader("What-if: change the code")
-        variant = st.radio("App version", list(ingest.VARIANTS), format_func=lambda k: ingest.VARIANTS[k]["label"])
-        if st.button("Re-ingest app code & re-triage", width="stretch"):
-            with st.spinner("Rewriting the app layer of the graph..."):
-                before = {f["vuln"]: f["verdict"] for f in findings}
-                ingest.reload_app_layer(s, variant)
-                analysis.triage(s, label=variant)
-                st.session_state.diff = {f["vuln"]: (before[f["vuln"]], f["verdict"])
-                                         for f in analysis.latest_findings(s) if before.get(f["vuln"]) != f["verdict"]}
-            st.rerun()
-        if st.button("Rebuild everything from scratch", width="stretch"):
-            s.reset()
-            st.rerun()
+        if PUBLIC:
+            st.info("Read-only public demo: rebuilds, what-if edits and real actions are disabled by the backend.")
+            fw = frozen.load_whatif()
+            if fw:
+                st.subheader("What-if (recorded)")
+                st.caption(f"{fw['description']}: exposed advisories {fw['exposed_before']} → {fw['exposed_after']} "
+                           f"(snapshots `{fw['baseline_snapshot']}` → `{fw['variant_snapshot']}`)")
+                with st.expander(f"{len(fw['flips'])} verdict flips"):
+                    st.dataframe(pd.DataFrame(fw["flips"]), hide_index=True)
+        else:
+            st.subheader("What-if: change the code")
+            variant = st.radio("App version", list(ingest.VARIANTS), format_func=lambda k: ingest.VARIANTS[k]["label"])
+            if st.button("Re-ingest app code & re-triage", width="stretch"):
+                with st.spinner("Rewriting the app layer of the graph..."):
+                    before = {f["vuln"]: f["verdict"] for f in findings}
+                    ingest.reload_app_layer(s, variant)
+                    analysis.triage(s, label=variant)
+                    st.session_state.diff = {f["vuln"]: (before[f["vuln"]], f["verdict"])
+                                             for f in analysis.latest_findings(s) if before.get(f["vuln"]) != f["verdict"]}
+                st.rerun()
+            if st.button("Rebuild everything from scratch", width="stretch"):
+                s.reset()
+                st.rerun()
 
     st.header("Vulnerability reachability triage")
     counts = {v: sum(1 for f in findings if f["verdict"] == v) for v in VERDICT_STYLE}
@@ -131,7 +190,8 @@ def main() -> None:
         st.success("Verdicts changed by the code change: " + "; ".join(
             f"**{k}** {a} → **{b}**" for k, (a, b) in st.session_state.diff.items()))
 
-    tab_triage, tab_agent, tab_actions, tab_cypher = st.tabs(["Triage & proof", "Agent", "Actions (human approval)", "Graph & Cypher"])
+    tab_triage, tab_fix, tab_agent, tab_actions, tab_cypher = st.tabs(
+        ["Triage & proof", "Graph-checked fix", "Agent", "Actions (human approval)", "Graph & Cypher"])
 
     with tab_triage:
         left, right = st.columns([5, 6])
@@ -156,16 +216,23 @@ def main() -> None:
         st.subheader("Where to fix first")
         c1, c2 = st.columns(2)
         gp = analysis.guard_points(s, run_id)
-        up = analysis.upgrade_plan(s, run_id)
         c1.markdown("**Guard points**: app functions on the most exposed paths")
         c1.dataframe(pd.DataFrame(gp), hide_index=True, width="stretch")
-        c2.markdown("**Upgrade leverage**: one version bump, how many exposed advisories it clears")
-        c2.dataframe(pd.DataFrame(up).drop(columns=["advisories"]) if up else pd.DataFrame(), hide_index=True,
-                     width="stretch")
+        c2.markdown("**Version-aware upgrade plan** (constraints read from the graph)")
+        try:
+            plan = planner.plan_remediation(s, run_id)
+            c2.dataframe(pd.DataFrame(plan.changes)[["package", "from", "to"]], hide_index=True, width="stretch")
+            for r in plan.rejected:
+                c2.caption(f"⚠️ {r['reason']} → {r['resolution']}")
+        except Exception as exc:
+            c2.caption(f"Plan unavailable ({exc.__class__.__name__}).")
         exposed = [f["finding"] for f in findings if f["verdict"] in ("REACHABLE", "POSSIBLY_REACHABLE")]
         if exposed:
             st.subheader("Exposure map: every exposed path")
             st.iframe(path_graph(s, exposed, "720px"), height=740)
+
+    with tab_fix:
+        render_fix_tab(s, PUBLIC)
 
     with tab_agent:
         st.caption("Gemini calls graph tools (explain_finding, recommend_fixes, query_graph, ...). It can propose actions; you approve them.")
@@ -189,8 +256,9 @@ def main() -> None:
             st.rerun()
 
     with tab_actions:
-        st.caption("Nothing runs until you approve. On approval the graph is re-checked, so stale plans are refused.")
-        if st.button("Propose OpenVEX document for this run"):
+        st.caption("Nothing runs until you approve. Approval is bound to the exact payload and graph snapshot: any change "
+                   "to the evidence, target or content aborts it.")
+        if not PUBLIC and st.button("Propose OpenVEX document for this run"):
             actions.propose_vex(s)
             st.rerun()
         if st.session_state.get("last_action"):
@@ -207,7 +275,7 @@ def main() -> None:
             c[0].write(f"`{a['id']}`")
             c[1].write(f"**{a['type']}**: {a['title']}" + (f"  → {a['team']}" if a["team"] else ""))
             c[2].write(a["status"])
-            if a["status"] == "proposed" and c[3].button("Approve", key=a["id"]):
+            if a["status"] == "proposed" and not PUBLIC and c[3].button("Approve", key=a["id"]):
                 st.session_state.last_action = (a["id"], actions.execute(s, a["id"]))
                 st.rerun()
             elif a["url"]:

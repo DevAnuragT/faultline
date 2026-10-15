@@ -16,6 +16,7 @@ import uuid
 
 from packaging.version import Version
 
+from . import guard
 from .graph import Store
 
 EXACT_PATH = """
@@ -70,6 +71,7 @@ def run_snapshot(st: Store, run_id: str) -> str:
 
 def triage(st: Store, label: str = "baseline") -> str:
     """Compute a verdict for every advisory, persist Finding nodes with witness paths. Returns the run id."""
+    guard.require_writable("Triage")
     run_id = f"run-{int(time.time())}-{uuid.uuid4().hex[:4]}"
     st.q("CREATE (:Run {id:$id, label:$label, ts:$ts, snapshot:$snap})",
          {"id": run_id, "label": label, "ts": time.time_ns(), "snap": snapshot_hash(st)})

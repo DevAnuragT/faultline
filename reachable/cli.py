@@ -1,9 +1,13 @@
-"""Command line: python -m reachable.cli {ingest|triage|whatif <variant>|ask "<question>"|approve <action>}"""
+"""Command line:
+  python -m reachable.cli ingest | triage | whatif <variant> | ask "<question>"
+  python -m reachable.cli plan | remediate | propose-pr | approve <action> | freeze | seed
+"""
 from __future__ import annotations
 
+import json
 import sys
 
-from . import actions, analysis, ingest
+from . import actions, analysis, frozen, ingest, planner, verify
 from .agent import Agent
 from .graph import Store
 
@@ -33,6 +37,23 @@ def main(argv: list[str]) -> int:
         for t in trace:
             print(f"  tool> {t['tool']}({t['args']})")
         print(reply)
+    elif cmd == "plan":
+        print(json.dumps(planner.plan_remediation(st).as_dict(), indent=2))
+    elif cmd == "remediate":
+        res = verify.run_closed_loop(st)
+        print(verify.render_report(res))
+    elif cmd == "propose-pr":
+        print(actions.propose_fix_pr(st))
+    elif cmd == "freeze":
+        r = frozen.record_whatif(st)
+        print(f"what-if recorded: {len(r['flips'])} verdict flips, exposed {r['exposed_before']} -> {r['exposed_after']}")
+    elif cmd == "seed":
+        print(ingest.full_ingest(st))
+        analysis.triage(st)
+        res = verify.run_closed_loop(st)
+        print("remediation:", res["status"], res["before"], "->", res["after"])
+        r = frozen.record_whatif(st)
+        print(f"what-if recorded: {len(r['flips'])} flips; snapshot {r['baseline_snapshot']}")
     elif cmd == "approve":
         print(actions.execute(st, argv[1]))
     else:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
-from . import callgraph, sources
+from . import callgraph, guard, sources
 from .advisories import Vuln, query_pinned
 from .config import CACHE, DEMO_APP
 from .graph import Store, batches
@@ -209,6 +209,7 @@ def load_advisories(st: Store, vulns: list[Vuln], pins: dict[str, str], cg: call
 
 def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict[str, str] | None = None) -> dict:
     """Build every graph layer. `pins` overrides requirements.txt (used to build a candidate-fix scratch graph)."""
+    guard.require_writable("Rebuilding the graph")
     app_dir = prepare_app_dir(variant)
     pins = pins or parse_requirements(DEMO_APP / "requirements.txt")
     direct = [l.strip() for l in (DEMO_APP / "requirements.in").read_text().split() if l.strip()]
@@ -229,6 +230,7 @@ def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict
 
 def reload_app_layer(st: Store, variant: str) -> dict:
     """What-if: re-ingest only the app's code layer from a variant, leaving dependencies and advisories alone."""
+    guard.require_writable("The what-if re-ingest")
     pins = parse_requirements(DEMO_APP / "requirements.txt")
     cg = build_callgraph(pins, prepare_app_dir(variant))
     st.q("MATCH (n) WHERE (n:Function OR n:Module) AND n.layer = 'app' DETACH DELETE n")

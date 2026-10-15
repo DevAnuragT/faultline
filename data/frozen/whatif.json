@@ -1,0 +1,82 @@
+{
+  "variant": "no_preview_fetch",
+  "description": "Remove the outbound HTTP call from /preview",
+  "recorded_at": 1792072871,
+  "baseline_snapshot": "6065fe457b7c6225",
+  "variant_snapshot": "1aff83635c123288",
+  "flips": [
+    {
+      "vuln": "GHSA-2xpw-w6gg-jr37",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-38jv-5279-wg99",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-9wx4-h78v-vm56",
+      "package": "requests",
+      "version": "2.25.1",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-g4mx-q9vg-27p4",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-gc5v-m9x4-r6x2",
+      "package": "requests",
+      "version": "2.25.1",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-gm62-xv2j-4w53",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "POSSIBLY_REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-9hjg-9r4m-mvj7",
+      "package": "requests",
+      "version": "2.25.1",
+      "before": "REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-j8r2-6x86-q33q",
+      "package": "requests",
+      "version": "2.25.1",
+      "before": "REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-pq67-6m6q-mj2v",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "REACHABLE",
+      "after": "NO_STATIC_PATH"
+    },
+    {
+      "vuln": "GHSA-q2q7-5pp4-w6pg",
+      "package": "urllib3",
+      "version": "1.26.4",
+      "before": "REACHABLE",
+      "after": "NO_STATIC_PATH"
+    }
+  ],
+  "exposed_before": 11,
+  "exposed_after": 1,
+  "previous_runs_seen": 33
+}
