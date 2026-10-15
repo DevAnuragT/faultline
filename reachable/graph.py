@@ -8,7 +8,8 @@ from . import config
 
 class Store:
     def __init__(self, graph: str | None = None) -> None:
-        self.db = FalkorDB(host=config.FALKORDB_HOST, port=config.FALKORDB_PORT, password=config.FALKORDB_PASSWORD)
+        self.db = FalkorDB(host=config.FALKORDB_HOST, port=config.FALKORDB_PORT, username=config.FALKORDB_USERNAME,
+                           password=config.FALKORDB_PASSWORD, ssl=config.FALKORDB_SSL)
         self.name = graph or config.GRAPH_NAME
         self.g = self.db.select_graph(self.name)
 

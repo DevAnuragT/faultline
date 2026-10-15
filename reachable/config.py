@@ -26,6 +26,8 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 FALKORDB_HOST = os.environ.get("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.environ.get("FALKORDB_PORT", "6379"))
 FALKORDB_PASSWORD = os.environ.get("FALKORDB_PASSWORD") or None
+FALKORDB_USERNAME = os.environ.get("FALKORDB_USERNAME") or None
+FALKORDB_SSL = os.environ.get("FALKORDB_SSL", "").lower() in ("1", "true", "yes")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 GRAPH_NAME = os.environ.get("GRAPH_NAME", "reachable")
 
