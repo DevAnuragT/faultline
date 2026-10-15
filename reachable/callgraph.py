@@ -95,6 +95,8 @@ class CallGraph:
         self.endpoints: list[Endpoint] = []
         self.registered: dict[str, set[str]] = defaultdict(set)  # dist -> functions registered at import time
         self.dispatch_sites: list[str] = []
+        self._locals: dict[str, set[str]] = {}
+        self._visible: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------------ indexing
     def add_root(self, root: Path, dist: str) -> None:
@@ -255,6 +257,79 @@ class CallGraph:
         t = self.resolve_expr(ann, ctx)
         return ("inst", t[1]) if t and t[0] == "cls" else None
 
+    # ------------------------------------------------------------------ scope helpers
+    def _local_names(self, fn: Func) -> set[str]:
+        """Names bound inside fn (params, assignments, loop/with/except targets) and its enclosing functions.
+        A call through such a name must never fall back to a same-named module-level function."""
+        if fn.qual in self._locals:
+            return self._locals[fn.qual]
+        names: set[str] = set(self._local_names(self.funcs[fn.parent])) if fn.parent in self.funcs else set()
+        node = fn.node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = node.args
+            for arg in a.posonlyargs + a.args + a.kwonlyargs + ([a.vararg] if a.vararg else []) + ([a.kwarg] if a.kwarg else []):
+                names.add(arg.arg)
+            for n in self._own_nodes(fn):
+                if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.For, ast.AsyncFor, ast.With,
+                                  ast.AsyncWith, ast.ExceptHandler, ast.NamedExpr)):
+                    targets = []
+                    if isinstance(n, ast.Assign):
+                        targets = n.targets
+                    elif isinstance(n, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+                        targets = [n.target]
+                    elif isinstance(n, (ast.For, ast.AsyncFor)):
+                        targets = [n.target]
+                    elif isinstance(n, (ast.With, ast.AsyncWith)):
+                        targets = [i.optional_vars for i in n.items if i.optional_vars is not None]
+                    elif isinstance(n, ast.ExceptHandler) and n.name:
+                        names.add(n.name)
+                    for t in targets:
+                        for sub in ast.walk(t):
+                            if isinstance(sub, ast.Name):
+                                names.add(sub.id)
+        self._locals[fn.qual] = names
+        return names
+
+    def _dist_of_module(self, name: str) -> str | None:
+        parts = name.split(".")
+        while parts:
+            m = self.mods.get(".".join(parts))
+            if m:
+                return m.dist
+            parts.pop()
+        return None
+
+    def visible_dists(self, mname: str) -> set[str]:
+        """Distributions a module can legitimately call into: its own plus everything it imports."""
+        if mname in self._visible:
+            return self._visible[mname]
+        m = self.mods[mname]
+        out = {m.dist}
+        for imp in m.imports.values():
+            target = imp[1] if imp[0] == "mod" else f"{imp[1]}.{imp[2]}"
+            d = self._dist_of_module(target)
+            if d:
+                out.add(d)
+        for star in m.stars:
+            d = self._dist_of_module(star)
+            if d:
+                out.add(d)
+        self._visible[mname] = out
+        return out
+
+    @staticmethod
+    def _root_name(e) -> str | None:
+        while True:
+            if isinstance(e, ast.Attribute):
+                e = e.value
+            elif isinstance(e, ast.Call):
+                e = e.func
+            elif isinstance(e, ast.Subscript):
+                e = e.value
+            else:
+                break
+        return e.id if isinstance(e, ast.Name) else None
+
     def resolve_expr(self, e, ctx: Ctx):
         if isinstance(e, ast.Name):
             if e.id in ctx.env:
@@ -264,6 +339,8 @@ class CallGraph:
                 if e.id in fn.nested:
                     return ("fn", fn.nested[e.id])
                 fn = self.funcs.get(fn.parent) if fn.parent else None
+            if not ctx.func.is_module_body and e.id in self._local_names(ctx.func):
+                return None  # bound locally to something we can't type: never fall back to a module-level name
             return self.resolve_name_in_module(ctx.mname, e.id)
         if isinstance(e, ast.Attribute):
             return self._attr_of(self.resolve_expr(e.value, ctx), e.attr)
@@ -409,8 +486,13 @@ class CallGraph:
         if isinstance(c.func, ast.Attribute):
             if self.resolve_expr(c.func.value, ctx) is not None:
                 return
+            root = self._root_name(c.func.value)
+            if root and root in self.mods[ctx.mname].imports and root not in self._local_names(fn):
+                return  # receiver is an import of an unanalyzed package (e.g. flask.request): not a guess target
             name = c.func.attr
-            cands = self.methods_by_name.get(name, [])
+            visible = self.visible_dists(ctx.mname)
+            cands = [q for q in self.methods_by_name.get(name, [])
+                     if self.mods[self.funcs[q].module].dist in visible]
             if name in GUESS_STOPLIST or name.startswith("__") or not (1 <= len(cands) <= MAX_GUESS):
                 return
             for q in cands:

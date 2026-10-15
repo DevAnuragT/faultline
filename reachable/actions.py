@@ -82,17 +82,18 @@ def build_vex(st: Store) -> dict:
         "REACHABLE": ("affected", None),
         "POSSIBLY_REACHABLE": ("under_investigation", None),
         "NEEDS_REVIEW": ("under_investigation", None),
-        "NO_STATIC_PATH": ("not_affected", "vulnerable_code_not_in_execute_path"),
+        # Never assert not_affected from a static scan: dynamic dispatch is not modelled.
+        "NO_STATIC_PATH": ("under_investigation", None),
     }
     statements = []
     for f in analysis.latest_findings(st):
         s, just = status[f["verdict"]]
         stmt = {"vulnerability": {"name": f["cve"] or f["vuln"], "@id": f["vuln"]},
                 "products": [{"@id": f"pkg:pypi/{f['package'].lower()}@{f['version']}"}], "status": s}
-        if just:
-            stmt["justification"] = just
-            stmt["impact_statement"] = ("No static call path from any public endpoint to the vulnerable function "
-                                        "(Reachable). Dynamic dispatch is not modelled; re-run after code changes.")
+        if f["verdict"] == "NO_STATIC_PATH":
+            stmt["status_notes"] = ("Reachable found no static call path from any public endpoint to the vulnerable "
+                                    "function in this application revision. Dynamic dispatch is not modelled, so this "
+                                    "is not an assertion of non-exposure.")
         elif s == "affected":
             stmt["action_statement"] = f["fixed_version"] and f"Upgrade to >={f['fixed_version']}" or "See advisory"
         statements.append(stmt)

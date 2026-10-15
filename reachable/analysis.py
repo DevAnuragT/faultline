@@ -56,9 +56,11 @@ def triage(st: Store, label: str = "baseline") -> str:
         verdict, reason, path, layers, kinds, endpoint = _decide(st, vid, bool(parsed), symbols)
         fid = f"{run_id}:{vid}"
         st.q("MATCH (r:Run {id:$run}), (v:Vuln {id:$vid}) CREATE (r)-[:HAS_FINDING]->(f:Finding {id:$fid, verdict:$verdict, "
-             "reason:$reason, path_len:$plen, run:$run})-[:FOR]->(v)",
+             "reason:$reason, path_len:$plen, run:$run, path:$path, kinds:$kinds, layers:$layers, endpoint:$ep})"
+             "-[:FOR]->(v)",
              {"run": run_id, "vid": vid, "fid": fid, "verdict": verdict, "reason": reason,
-              "plen": max(len(path) - 1, 0)})
+              "plen": max(len(path) - 1, 0), "path": path, "kinds": ["ENTRY"] + list(kinds) if path else [],
+              "layers": layers, "ep": endpoint or ""})
         if endpoint:
             st.q("MATCH (f:Finding {id:$fid}), (e:Endpoint {id:$e}) CREATE (f)-[:VIA]->(e)", {"fid": fid, "e": endpoint})
         for i, (q, layer) in enumerate(zip(path, layers)):
@@ -119,9 +121,12 @@ def latest_findings(st: Store, run_id: str | None = None) -> list[dict]:
 
 
 def witness_path(st: Store, finding_id: str) -> list[dict]:
-    rows = st.q("MATCH (f:Finding {id:$id})-[e:EVIDENCE]->(n:Function) RETURN e.step, n.qualname, n.layer, e.via "
-                "ORDER BY e.step", {"id": finding_id})
-    return [{"step": r[0], "function": r[1], "layer": r[2], "via": r[3]} for r in rows]
+    """The stored proof. Read from the Finding's own properties, so it survives later re-ingests of the app layer."""
+    rows = st.q("MATCH (f:Finding {id:$id}) RETURN f.path, f.kinds, f.layers", {"id": finding_id})
+    if not rows or not rows[0][0]:
+        return []
+    path, kinds, layers = rows[0]
+    return [{"step": i, "function": q, "layer": layers[i], "via": kinds[i]} for i, q in enumerate(path)]
 
 
 def guard_points(st: Store, run_id: str) -> list[dict]:

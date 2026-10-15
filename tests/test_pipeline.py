@@ -92,3 +92,21 @@ def test_query_tool_is_read_only(st):
 def test_betweenness_finds_supply_chain_hubs(st):
     hubs = {h["node"] for h in analysis.supply_chain_chokepoints(st)}
     assert "requests==2.25.1" in hubs
+
+
+def test_whatif_preserves_historical_witness_paths(st):
+    analysis.triage(st, label="before")
+    old = next(f for f in analysis.latest_findings(st) if f["vuln"] == "GHSA-q2q7-5pp4-w6pg")
+    before_path = [p["function"] for p in analysis.witness_path(st, old["finding"])]
+    ingest.reload_app_layer(st, "no_preview_fetch")
+    analysis.triage(st, label="after")
+    assert [p["function"] for p in analysis.witness_path(st, old["finding"])] == before_path
+    ingest.reload_app_layer(st, "baseline")
+    analysis.triage(st, label="baseline")
+
+
+def test_vex_never_asserts_not_affected_from_static_scan(st):
+    analysis.triage(st)
+    statuses = {s["status"] for s in actions.build_vex(st)["statements"]}
+    assert "not_affected" not in statuses
+    assert {"affected", "under_investigation"} <= statuses
