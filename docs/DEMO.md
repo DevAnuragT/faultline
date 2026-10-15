@@ -1,20 +1,30 @@
-# Demo script (about 2.5 min)
+# Demo script (about 2:30)
 
-Setup: FalkorDB running, `streamlit run streamlit_app.py`, graph already built, FalkorDB Browser open on :3000.
+Setup: local FalkorDB, `make seed`, `make run` (writable mode, `GITHUB_REPO` set to the demo repo and `gh` logged in, if you
+want a real draft PR). Open the **Graph-checked fix** tab; keep FalkorDB Browser on :3000 in another tab.
+Use only numbers from `make demo`.
 
-1. **0:00 The problem (15s).** "Dependency scanners list 33 advisories for this small Flask app. Which ones can an
-   attacker actually reach?" Show the metric row: 33 advisories, 4 reachable, 7 possibly, 18 needs review.
-2. **0:15 The proof (40s).** Triage tab, pick GHSA-q2q7-5pp4-w6pg (urllib3). The graph shows
-   `GET /preview → fetch_preview → requests.get → … → prepare_url → parse_url`, built from AST of the real packages.
-   Point out dashed amber edges for low-confidence links versus solid exact calls.
-3. **0:55 The decoy (15s).** Pick a Jinja2 advisory: the app imports Jinja2 but the vulnerable filter is only registered
-   in a dict, so it is NEEDS_REVIEW, not a false alarm and not a false all-clear.
-4. **1:10 The agent acts (35s).** Agent tab: "What should we fix first?" Show tool calls (`recommend_fixes`), the guard
-   point `vulnshop.preview.fetch_preview` covering the most paths, and the single `requests` bump that clears the most.
-   Then "Propose issues for everything reachable." Actions tab: issues assigned to `@vulnshop/growth`, waiting for approval.
-5. **1:45 Wow: the verdict flips (35s).** Sidebar: choose "Remove the outbound HTTP call from /preview", re-ingest.
-   Banner shows 10 advisories flip to NO_STATIC_PATH. Click Approve on the old issue: refused as a stale plan.
-6. **2:20 Why FalkorDB (10s).** Graph & Cypher tab: the `shortestPath` query that produced every verdict, and
-   `algo.betweenness` hubs. "Remove the graph and the verdicts, evidence and routing disappear."
+**0:00–0:30, the hook**
+"Your scanner lists 33 advisories. Which can an attacker actually reach? Reachable loads the app and the real source of
+its dependencies into FalkorDB and asks the graph." Triage tab: click GHSA-q2q7-5pp4-w6pg; the path lights up from
+`GET /preview` through `requests` into `urllib3.parse_url`, 8 hops, all exact calls. "11 are exposed."
 
-Reset between takes: sidebar → baseline → Re-ingest, or `python -m reachable.cli whatif baseline`.
+**0:30–1:15, the agent catches its own mistake**
+Agent tab: "What should we fix first?" The naive plan bumps urllib3 to 2.6.3. The graph rejects it: `requests 2.25.1
+requires urllib3<1.27`, a constraint stored on a graph edge. It re-plans a co-upgrade.
+
+**1:15–1:55, graph-checked fix**
+Graph-checked fix tab → "Plan & verify": a scratch graph is built with the candidate versions and re-triaged. Gates:
+coverage retained, constraints consistent, exposure 11 → 0, no new exposure. "If coverage had dropped, this would say
+UNVERIFIED, not fixed."
+
+**1:55–2:20, act, bound to evidence**
+"Propose draft PR" → Actions tab → Approve. The draft PR opens with the gate report (show the URL). Back in the graph, change one
+edge and re-approve a sibling action: refused as stale. "Authorization expires when the evidence changes."
+
+**2:20–2:30, why a graph**
+Graph & Cypher tab: the `shortestPath` query behind every verdict. "Without FalkorDB there are no verdicts, no
+evidence and no way to verify the fix."
+
+Reset between takes: `make seed` (rebuilds, re-records the what-if). The public read-only site (`REACHABLE_PUBLIC=true`)
+shows the recorded run and cannot be changed by visitors.
