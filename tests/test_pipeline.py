@@ -110,3 +110,22 @@ def test_vex_never_asserts_not_affected_from_static_scan(st):
     statuses = {s["status"] for s in actions.build_vex(st)["statements"]}
     assert "not_affected" not in statuses
     assert {"affected", "under_investigation"} <= statuses
+
+
+def test_planner_rejects_impossible_bump_and_proposes_consistent_co_upgrade(st):
+    from reachable import planner
+    analysis.triage(st)
+    plan = planner.plan_remediation(st)
+    naive = [r for r in plan.rejected if r["package"] == "urllib3"]
+    assert naive and "requests 2.25.1 requires urllib3<1.27" in naive[0]["reason"]
+    assert naive[0]["resolution"].startswith("co-upgrade requests")
+    assert plan.consistent
+    assert plan.pins_after["urllib3"] == "2.6.3" and plan.pins_after["requests"] != "2.25.1"
+    assert planner.consistency_conflicts({**plan.pins_before, "urllib3": "2.6.3"}) != []
+
+
+def test_agent_fix_recommendation_never_suggests_the_impossible_bump(st):
+    from reachable.agent import Toolbox
+    analysis.triage(st)
+    res = Toolbox(st).recommend_fixes()
+    assert res["plan"]["consistent"]

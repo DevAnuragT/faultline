@@ -4,7 +4,7 @@ reachability and it cannot execute actions (humans approve those in the UI)."""
 import re
 import time
 
-from . import actions, analysis, config, llm
+from . import actions, analysis, config, llm, planner
 from .graph import Store
 
 SYSTEM = """You are Reachable, a vulnerability triage agent. Your knowledge comes ONLY from tools that query a
@@ -56,10 +56,12 @@ class Toolbox:
         return res
 
     def recommend_fixes(self) -> dict:
-        """Aggregate the graph to recommend fixes: the app functions that sit on the most exposed paths
-        (guard points) and the single package upgrades that clear the most exposed advisories."""
+        """Recommend fixes from the graph: the app functions on the most exposed paths (guard points) and a
+        version-aware upgrade plan. The plan checks dependency constraints stored in the graph, rejects bumps that are
+        impossible on their own (and says why) and finds the co-upgrades that make the set installable."""
         run = analysis.latest_findings(self.st)[0]["run"]
-        res = {"guard_points": analysis.guard_points(self.st, run), "upgrades": analysis.upgrade_plan(self.st, run)}
+        p = planner.plan_remediation(self.st, run)
+        res = {"guard_points": analysis.guard_points(self.st, run), "plan": p.as_dict()}
         self._log("recommend_fixes", {}, res)
         return res
 
@@ -163,8 +165,8 @@ class Agent:
         if any(w in m for w in ("fix", "upgrade", "priorit", "recommend")):
             r = self.box.recommend_fixes()
             lines = [f"- Guard `{g['function']}` covers {g['findings']} exposed findings" for g in r["guard_points"][:3]]
-            lines += [f"- Upgrade `{u['package']}` {u['installed']} -> >={u['upgrade_to']} clears {u['clears']}"
-                      for u in r["upgrades"] if u["upgrade_to"]]
+            lines += [f"- Rejected: {x['reason']} (resolution: {x['resolution']})" for x in r["plan"]["rejected"]]
+            lines += [f"- Upgrade `{c['package']}` {c['from']} -> {c['to']}: {c['reason']}" for c in r["plan"]["changes"]]
             return "Recommended actions:\n" + "\n".join(lines)
         if "issue" in m:
             out = [self.box.propose_issue(f["vuln"]) for f in analysis.latest_findings(self.st) if f["verdict"] == "REACHABLE"]

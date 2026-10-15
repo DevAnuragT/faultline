@@ -1,6 +1,7 @@
 """OSV advisory ingestion. Raw OSV JSON is cached in data/cache/osv so runs are reproducible offline."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import urllib.request
@@ -80,8 +81,8 @@ def _severity(raw: dict) -> str:
 
 def query_pinned(pins: dict[str, str], pin_cache: bool = True) -> list[Vuln]:
     """pins: {package: version}. Returns de-duplicated vulnerabilities (GHSA preferred over PYSEC)."""
-    cache = OSV_CACHE / "_query.json"
     key = json.dumps(sorted(pins.items()))
+    cache = OSV_CACHE / f"_query-{hashlib.sha1(key.encode()).hexdigest()[:12]}.json"
     if pin_cache and cache.exists() and json.loads(cache.read_text()).get("key") == key:
         hits = json.loads(cache.read_text())["hits"]
     else:

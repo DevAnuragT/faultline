@@ -60,6 +60,7 @@ FALKORDB_USERNAME = os.environ.get("FALKORDB_USERNAME") or None
 FALKORDB_SSL = os.environ.get("FALKORDB_SSL", "").lower() in ("1", "true", "yes")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 GRAPH_NAME = os.environ.get("GRAPH_NAME", "reachable")
+PUBLIC_MODE = os.environ.get("REACHABLE_PUBLIC", "").lower() in ("1", "true", "yes")
 
 for d in (CACHE, SRC_CACHE):
     d.mkdir(parents=True, exist_ok=True)

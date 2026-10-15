@@ -8,6 +8,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 from . import callgraph, sources
 from .advisories import Vuln, query_pinned
 from .config import CACHE, DEMO_APP
@@ -51,16 +53,28 @@ def pypi_requires(name: str, version: str) -> list[str]:
     return json.loads(cache.read_text())
 
 
-def dependency_edges(pins: dict[str, str]) -> list[tuple[str, str]]:
+def parse_requires(requires: list[str]) -> list[tuple[str, str]]:
+    """[(normalized dependency name, specifier text)] for requirements that apply without extras."""
+    out = []
+    for raw in requires:
+        try:
+            req = Requirement(raw)
+        except Exception:
+            continue
+        if req.marker is not None and not req.marker.evaluate({"extra": ""}):
+            continue
+        out.append((_norm(req.name), str(req.specifier)))
+    return out
+
+
+def dependency_edges(pins: dict[str, str]) -> list[tuple[str, str, str]]:
+    """(dependent, dependency, specifier) for every dependency edge inside the pinned set."""
     by_norm = {_norm(n): n for n in pins}
     edges = []
     for name, ver in pins.items():
-        for req in pypi_requires(name, ver):
-            if "extra ==" in req:
-                continue
-            dep = _norm(re.split(r"[ ;<>=!~(\[]", req.strip(), maxsplit=1)[0])
+        for dep, spec in parse_requires(pypi_requires(name, ver)):
             if dep in by_norm:
-                edges.append((name, by_norm[dep]))
+                edges.append((name, by_norm[dep], spec))
     return edges
 
 
@@ -100,10 +114,10 @@ def load_supply_chain(st: Store, pins: dict[str, str], direct: list[str]) -> Non
          {"rows": rows})
     st.q("UNWIND $rows AS r MATCH (a:Repo {name:$app}), (p:PackageVersion {key:r.key}) WHERE r.direct "
          "CREATE (a)-[:DEPENDS_ON {direct:true}]->(p)", {"rows": rows, "app": APP})
-    deps = [{"a": _pkg_key(a, pins), "b": _pkg_key(b, pins)} for a, b in dependency_edges(pins)]
+    deps = [{"a": _pkg_key(a, pins), "b": _pkg_key(b, pins), "spec": spec} for a, b, spec in dependency_edges(pins)]
     if deps:
         st.q("UNWIND $rows AS r MATCH (a:PackageVersion {key:r.a}), (b:PackageVersion {key:r.b}) "
-             "CREATE (a)-[:DEPENDS_ON {direct:false}]->(b)", {"rows": deps})
+             "CREATE (a)-[:DEPENDS_ON {direct:false, spec:r.spec}]->(b)", {"rows": deps})
 
 
 def _module_rows(cg: callgraph.CallGraph, only_app: bool | None = None):
@@ -193,9 +207,10 @@ def load_advisories(st: Store, vulns: list[Vuln], pins: dict[str, str], cg: call
                  {"id": v.id, "q": s, "src": sym["source"], "conf": float(sym["confidence"])})
 
 
-def full_ingest(st: Store, variant: str = "baseline", progress=print) -> dict:
+def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict[str, str] | None = None) -> dict:
+    """Build every graph layer. `pins` overrides requirements.txt (used to build a candidate-fix scratch graph)."""
     app_dir = prepare_app_dir(variant)
-    pins = parse_requirements(DEMO_APP / "requirements.txt")
+    pins = pins or parse_requirements(DEMO_APP / "requirements.txt")
     direct = [l.strip() for l in (DEMO_APP / "requirements.in").read_text().split() if l.strip()]
     progress("building call graph from app + dependency sources")
     cg = build_callgraph(pins, app_dir)

@@ -153,7 +153,8 @@ def extract_symbols(vuln: Vuln, cg: CallGraph, force: bool = False) -> dict:
                     "rationale": manual["rationale"], "patch_url": vuln.patch_urls[0] if vuln.patch_urls else None}
     cache = _load_map()
     cached = cache.get(vuln.id)
-    if cached and not force and not (cached["source"] == "heuristic" and config.GEMINI_API_KEY):
+    usable = cached and all(q in cg.funcs for q in cached["symbols"])  # symbol must exist in this release
+    if usable and not force and not (cached["source"] == "heuristic" and config.GEMINI_API_KEY):
         return cached
     result: dict = {"symbols": [], "confidence": 0.0, "source": "none", "rationale": "No fix commit in advisory",
                     "patch_url": None}

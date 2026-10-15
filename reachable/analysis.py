@@ -9,6 +9,8 @@ Verdicts
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import time
 import uuid
 
@@ -48,10 +50,29 @@ ORDER BY v.package, v.id
 """
 
 
+def snapshot_hash(st: Store) -> str:
+    """Fingerprint of everything a verdict depends on: pins, per-dist code size, app edges, symbol mappings."""
+    parts = [
+        st.q("MATCH (p:PackageVersion) RETURN p.key ORDER BY p.key"),
+        st.q("MATCH (f:Function) RETURN f.dist, count(f) ORDER BY f.dist"),
+        st.q("MATCH ()-[r]->() WHERE type(r) IN ['CALLS','MAYBE_CALLS','REFERENCES'] RETURN type(r), count(r) ORDER BY type(r)"),
+        st.q("MATCH (a:Function {layer:'app'})-[r]->(b) RETURN a.qualname, type(r), b.qualname "
+             "ORDER BY a.qualname, type(r), b.qualname"),
+        st.q("MATCH (v:Vuln)-[:VULNERABLE_SYMBOL]->(f) RETURN v.id, f.qualname ORDER BY v.id, f.qualname"),
+    ]
+    return hashlib.sha256(json.dumps(parts, default=str).encode()).hexdigest()[:16]
+
+
+def run_snapshot(st: Store, run_id: str) -> str:
+    rows = st.q("MATCH (r:Run {id:$id}) RETURN r.snapshot", {"id": run_id})
+    return rows[0][0] if rows else ""
+
+
 def triage(st: Store, label: str = "baseline") -> str:
     """Compute a verdict for every advisory, persist Finding nodes with witness paths. Returns the run id."""
     run_id = f"run-{int(time.time())}-{uuid.uuid4().hex[:4]}"
-    st.q("CREATE (:Run {id:$id, label:$label, ts:$ts})", {"id": run_id, "label": label, "ts": time.time_ns()})
+    st.q("CREATE (:Run {id:$id, label:$label, ts:$ts, snapshot:$snap})",
+         {"id": run_id, "label": label, "ts": time.time_ns(), "snap": snapshot_hash(st)})
     for vid, cve, pkg, ver, parsed, sev, fixed, summary, symbols in st.q(VULN_INFO):
         verdict, reason, path, layers, kinds, endpoint = _decide(st, vid, bool(parsed), symbols)
         fid = f"{run_id}:{vid}"

@@ -82,6 +82,16 @@
    "requests.utils.extract_zipped_paths"
   ]
  },
+ "GHSA-gh4c-6fx4-qh6g": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/urllib3/urllib3/commit/ea2ad7b21a80da3632f80016526a18864586077f",
+  "rationale": "The fix modifies the decompress method to return early if the Deflate stream has reached EOF, and updates the has_unconsumed_tail property to account for the EOF state, preventing the infinite loop described in the advisory.",
+  "source": "gemini",
+  "symbols": [
+   "urllib3.response.DeflateDecoder.decompress",
+   "urllib3.response.DeflateDecoder.has_unconsumed_tail"
+  ]
+ },
  "GHSA-gm62-xv2j-4w53": {
   "confidence": 1.0,
   "patch_url": "https://github.com/urllib3/urllib3/commit/24d7b67eac89f94e11003424bcf0d8f7b72222a8",
@@ -126,6 +136,13 @@
   "symbols": [
    "requests.sessions.SessionRedirectMixin.rebuild_proxies"
   ]
+ },
+ "GHSA-mf9v-mfxr-j63j": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
  },
  "GHSA-pq67-6m6q-mj2v": {
   "confidence": 1.0,
