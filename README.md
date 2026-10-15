@@ -148,7 +148,8 @@ is human-curated in `data/curated_symbols.json` and labelled `curated` in the UI
 * Guard-point counts rank witnesses; they are not dominator proofs.
 * Reachability is not exploitability. "Graph-checked" means the rebuilt graph shows the fix, not a security guarantee.
 
-Design notes for each component are in [`docs/DESIGN.md`](docs/DESIGN.md).
+Design notes for each component are in [`docs/DESIGN.md`](docs/DESIGN.md); the full story of what we built, why, and what the
+results were is in [`docs/PROJECT_STORY.md`](docs/PROJECT_STORY.md).
 
 ## AI assistance disclosure
 
