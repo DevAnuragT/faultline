@@ -30,12 +30,12 @@ def ensure_graph(s: Store) -> None:
         analysis.triage(s)
 
 
-def path_graph(s: Store, finding_ids: list[str], height: str = "430px") -> str:
+def path_graph(s: Store, finding_ids: list[str], height: str = "600px") -> str:
     net = Network(height=height, width="100%", directed=True, bgcolor="#0e1117", font_color="#e6e6e6",
                   cdn_resources="in_line")
-    net.set_options('{"layout":{"hierarchical":{"enabled":true,"direction":"LR","sortMethod":"directed",'
-                    '"levelSeparation":120,"nodeSpacing":60}},"physics":{"enabled":false},'
-                    '"nodes":{"font":{"size":20,"color":"#e6e6e6"},"margin":10},"edges":{"width":2,"arrows":{"to":{"scaleFactor":0.8}}}}')
+    net.set_options('{"layout":{"hierarchical":{"enabled":true,"direction":"UD","sortMethod":"directed",'
+                    '"levelSeparation":80,"nodeSpacing":170}},"physics":{"enabled":false},'
+                    '"nodes":{"font":{"size":16,"color":"#e6e6e6"},"margin":9},"edges":{"width":2,"arrows":{"to":{"scaleFactor":0.8}}}}')
     seen: set[str] = set()
     for fid in finding_ids:
         vuln = s.q("MATCH (f:Finding {id:$id})-[:FOR]->(v:Vuln) RETURN v.id, v.package", {"id": fid})[0]
@@ -150,7 +150,7 @@ def main() -> None:
                            f"{f['symbol_rationale']}" + (f"  \n[fix commit]({f['patch_url']})" if f["patch_url"] else ""))
                 path = analysis.witness_path(s, f["finding"])
                 if path:
-                    st.iframe(path_graph(s, [f["finding"]]), height=450)
+                    st.iframe(path_graph(s, [f["finding"]], "600px"), height=620)
                     with st.expander("Witness path (stored as EVIDENCE edges)"):
                         st.dataframe(pd.DataFrame(path), hide_index=True, width="stretch")
         st.subheader("Where to fix first")
@@ -165,7 +165,7 @@ def main() -> None:
         exposed = [f["finding"] for f in findings if f["verdict"] in ("REACHABLE", "POSSIBLY_REACHABLE")]
         if exposed:
             st.subheader("Exposure map: every exposed path")
-            st.iframe(path_graph(s, exposed, "520px"), height=540)
+            st.iframe(path_graph(s, exposed, "720px"), height=740)
 
     with tab_agent:
         st.caption("Gemini calls graph tools (explain_finding, recommend_fixes, query_graph, ...). It can propose actions; you approve them.")
