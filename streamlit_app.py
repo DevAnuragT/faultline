@@ -76,12 +76,16 @@ def verdict_table(findings: list[dict]) -> pd.DataFrame:
 
 
 def main() -> None:
-    s = store()
     try:
+        s = store()
         s.q("RETURN 1")
     except Exception as exc:
-        st.error(f"FalkorDB is not reachable at {config.FALKORDB_HOST}:{config.FALKORDB_PORT}: {exc}")
-        st.code("docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest")
+        st.error(f"Cannot connect to FalkorDB at {config.FALKORDB_HOST}:{config.FALKORDB_PORT} "
+                 f"(user set: {bool(config.FALKORDB_USERNAME)}, password set: {bool(config.FALKORDB_PASSWORD)}, "
+                 f"ssl: {config.FALKORDB_SSL}). {exc.__class__.__name__}")
+        st.info("Running locally: `docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest`.  "
+                "On Streamlit Cloud: check App settings > Secrets (FALKORDB_HOST / PORT / USERNAME / PASSWORD / SSL).")
+        store.clear()
         return
     ensure_graph(s)
     if "agent" not in st.session_state:

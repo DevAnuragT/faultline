@@ -19,7 +19,20 @@ def _load_dotenv() -> None:
             os.environ.setdefault(k.strip(), v.strip())
 
 
+def _load_streamlit_secrets() -> None:
+    """On Streamlit Cloud, read secrets directly (don't rely on them being exported as env vars)."""
+    try:
+        import streamlit as st
+
+        for k, v in st.secrets.items():
+            if isinstance(v, (str, int, float, bool)):
+                os.environ.setdefault(k, str(v))
+    except Exception:
+        pass  # no secrets configured (local run)
+
+
 _load_dotenv()
+_load_streamlit_secrets()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
