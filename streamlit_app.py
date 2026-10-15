@@ -190,6 +190,12 @@ def main() -> None:
         if st.button("Propose OpenVEX document for this run"):
             actions.propose_vex(s)
             st.rerun()
+        if st.session_state.get("last_action"):
+            aid, res = st.session_state.last_action
+            if res["ok"]:
+                st.success(f"`{aid}` executed: {res.get('url') or res.get('file') or res.get('note', res['status'])}")
+            else:
+                st.error(f"`{aid}` refused: {res['error']}")
         rows = actions.list_actions(s)
         if not rows:
             st.write("No actions yet. Ask the agent to propose issues.")
@@ -199,8 +205,7 @@ def main() -> None:
             c[1].write(f"**{a['type']}**: {a['title']}" + (f"  → {a['team']}" if a["team"] else ""))
             c[2].write(a["status"])
             if a["status"] == "proposed" and c[3].button("Approve", key=a["id"]):
-                res = actions.execute(s, a["id"])
-                (st.success if res["ok"] else st.error)(str(res))
+                st.session_state.last_action = (a["id"], actions.execute(s, a["id"]))
                 st.rerun()
             elif a["url"]:
                 c[3].caption(a["url"])
