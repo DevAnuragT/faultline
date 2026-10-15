@@ -244,7 +244,7 @@ def main() -> None:
                         for t in trace:
                             st.code(f"{t['tool']}({t['args']})", language="python")
         examples = ["Summarize the risk: what is actually reachable?", "Why is GHSA-q2q7-5pp4-w6pg reachable? Show the path.",
-                    "What should we fix first?", "Propose issues for everything reachable."]
+                    "What should we fix first? Plan it, check it, and propose the PR.", "Propose issues for everything reachable."]
         picked = None
         for col, ex in zip(st.columns(len(examples)), examples):
             if col.button(ex, key=f"ex-{ex}", width="stretch"):

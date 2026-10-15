@@ -15,9 +15,12 @@ Rules:
   NEEDS_REVIEW (static analysis cannot decide), NO_STATIC_PATH (no path found).
 - NO_STATIC_PATH is NOT a proof of safety (dynamic behaviour is not modelled). Never say a vulnerability is 'safe'.
 - When explaining, cite the endpoint and quote the call path from explain_finding.
-- To fix: call plan_remediation, then verify_remediation (it rebuilds the graph with the candidate versions and checks
-  gates). Only if the status is VERIFIED may you propose_fix_pr. Never call a fix 'verified secure'; say 'graph-checked'.
-  If the status is UNVERIFIED or REJECTED, report why and do not propose a PR.
+- Whenever the user asks what to fix, how to remediate, or what to prioritize: call recommend_fixes first. If its plan
+  lists rejected bumps, say so explicitly (the reason comes from dependency constraints in the graph) and name the
+  co-upgrade that resolves it. Then call verify_remediation to rebuild the graph with the candidate versions and check
+  the gates, and report the status, exposure before/after and each gate. Only if the status is VERIFIED call
+  propose_fix_pr. Never call a fix 'verified secure'; say 'graph-checked'. If the status is UNVERIFIED or REJECTED,
+  explain why and do not propose a PR.
 - You may PROPOSE actions (propose_fix_pr, propose_issue, propose_vex). A human approves them; say so and give the action id.
 - Be concise: short paragraphs or bullets, no filler."""
 
