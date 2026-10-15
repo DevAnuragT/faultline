@@ -4,7 +4,7 @@ reachability and it cannot execute actions (humans approve those in the UI)."""
 import re
 import time
 
-from . import actions, analysis, config, llm, planner
+from . import actions, analysis, config, guard, llm, planner, verify
 from .graph import Store
 
 SYSTEM = """You are Reachable, a vulnerability triage agent. Your knowledge comes ONLY from tools that query a
@@ -15,7 +15,10 @@ Rules:
   NEEDS_REVIEW (static analysis cannot decide), NO_STATIC_PATH (no path found).
 - NO_STATIC_PATH is NOT a proof of safety (dynamic behaviour is not modelled). Never say a vulnerability is 'safe'.
 - When explaining, cite the endpoint and quote the call path from explain_finding.
-- You may PROPOSE actions (propose_issue, propose_vex). A human approves them; say so and give the action id.
+- To fix: call plan_remediation, then verify_remediation (it rebuilds the graph with the candidate versions and checks
+  gates). Only if the status is VERIFIED may you propose_fix_pr. Never call a fix 'verified secure'; say 'graph-checked'.
+  If the status is UNVERIFIED or REJECTED, report why and do not propose a PR.
+- You may PROPOSE actions (propose_fix_pr, propose_issue, propose_vex). A human approves them; say so and give the action id.
 - Be concise: short paragraphs or bullets, no filler."""
 
 FORBIDDEN = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|CALL\s+db\.|LOAD\s+CSV)\b", re.I)
@@ -86,22 +89,51 @@ class Toolbox:
         self._log("query_graph", {"cypher": cypher}, res)
         return res
 
-    def propose_issue(self, vuln_id: str) -> dict:
-        """Propose (not file) a tracking issue for an exposed finding, assigned to the owning team.
-        A human must approve it before anything is filed."""
-        res = actions.propose_issue(self.st, vuln_id)
-        self._log("propose_issue", {"vuln_id": vuln_id}, res)
+    def _guarded(self, name: str, args: dict, fn) -> dict:
+        try:
+            res = fn()
+        except guard.ReadOnlyError as exc:
+            res = {"ok": False, "error": str(exc)}
+        self._log(name, args, res)
         return res
+
+    def plan_remediation(self) -> dict:
+        """Plan version bumps for the exposed advisories using the dependency constraints stored in the graph.
+        Bumps that are impossible on their own are rejected with the reason, and a compatible co-upgrade is found."""
+        res = planner.plan_remediation(self.st).as_dict()
+        self._log("plan_remediation", {}, res)
+        return res
+
+    def verify_remediation(self) -> dict:
+        """Check the planned upgrade BEFORE proposing it: build the candidate dependency versions into a private
+        scratch graph, re-run triage there and compare to the baseline through gates (analysis coverage retained,
+        constraints consistent, exposure decreases, no new exposure). Status: VERIFIED, REJECTED or UNVERIFIED
+        (UNVERIFIED means analysis coverage dropped, so no success may be claimed). Takes several seconds."""
+        def run():
+            r = verify.run_closed_loop(self.st, progress=lambda m: None)
+            return {"id": r["id"], "status": r["status"], "gates": r["gates"], "before": r["before"], "after": r["after"],
+                    "cleared": r["cleared"], "new_exposed": r["new_exposed"], "changes": r["plan"]["changes"],
+                    "rejected_on_their_own": r["plan"]["rejected"]}
+        return self._guarded("verify_remediation", {}, run)
+
+    def propose_fix_pr(self) -> dict:
+        """Propose (not open) a draft pull request for the latest VERIFIED remediation. Refused unless the
+        remediation is VERIFIED against the current graph snapshot. A human must approve it."""
+        return self._guarded("propose_fix_pr", {}, lambda: actions.propose_fix_pr(self.st))
+
+    def propose_issue(self, vuln_id: str) -> dict:
+        """Propose (not file) a tracking issue for an exposed finding, routed to the owning team.
+        A human must approve it before anything is filed."""
+        return self._guarded("propose_issue", {"vuln_id": vuln_id}, lambda: actions.propose_issue(self.st, vuln_id))
 
     def propose_vex(self) -> dict:
         """Propose an OpenVEX document covering the latest triage run. A human must approve it."""
-        res = actions.propose_vex(self.st)
-        self._log("propose_vex", {}, res)
-        return res
+        return self._guarded("propose_vex", {}, lambda: actions.propose_vex(self.st))
 
     def tools(self) -> list:
-        return [self.list_findings, self.explain_finding, self.recommend_fixes, self.supply_chain_hubs,
-                self.query_graph, self.propose_issue, self.propose_vex]
+        return [self.list_findings, self.explain_finding, self.recommend_fixes, self.plan_remediation,
+                self.verify_remediation, self.supply_chain_hubs, self.query_graph, self.propose_fix_pr,
+                self.propose_issue, self.propose_vex]
 
 
 class Agent:
