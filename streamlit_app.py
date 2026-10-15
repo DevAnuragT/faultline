@@ -83,6 +83,8 @@ def main() -> None:
         st.error(f"Cannot connect to FalkorDB at {config.FALKORDB_HOST}:{config.FALKORDB_PORT} "
                  f"(user set: {bool(config.FALKORDB_USERNAME)}, password set: {bool(config.FALKORDB_PASSWORD)}, "
                  f"ssl: {config.FALKORDB_SSL}). {exc.__class__.__name__}")
+        st.warning(f"Streamlit secrets seen by the app (names only): {config.SECRETS_INFO['keys'] or 'none'}"
+                   + (f"  |  secrets parse error: {config.SECRETS_INFO['error']}" if config.SECRETS_INFO["error"] else ""))
         st.info("Running locally: `docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest`.  "
                 "On Streamlit Cloud: check App settings > Secrets (FALKORDB_HOST / PORT / USERNAME / PASSWORD / SSL).")
         store.clear()
