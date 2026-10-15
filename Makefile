@@ -15,7 +15,7 @@ seed:  ## (re)build the demo graph, run the closed loop, record the what-if for 
 	$(PY) -m reachable.cli seed
 
 run:
-	.venv/bin/streamlit run streamlit_app.py
+	.venv/bin/streamlit run streamlit_app.py --server.headless true
 
 mcp:  ## MCP server over stdio (pip install -r requirements-mcp.txt first)
 	$(PY) -m reachable.mcp_server
