@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.request
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
-from . import config
+from . import config, llm
 from .advisories import Vuln
 from .callgraph import CallGraph
 
@@ -114,7 +115,7 @@ def _ask_gemini(vuln: Vuln, diff_excerpt: str, cands: list[tuple[str, int]]) -> 
     from google import genai
     from google.genai import types
 
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    client = genai.Client(api_key=config.GEMINI_API_KEY, http_options=types.HttpOptions(timeout=45000))
     names = [c for c, _ in cands]
     prompt = (
         "You are a vulnerability analyst. Decide which function(s) of the vulnerable library release "
@@ -124,10 +125,20 @@ def _ask_gemini(vuln: Vuln, diff_excerpt: str, cands: list[tuple[str, int]]) -> 
         f"Advisory {vuln.id} ({vuln.package}): {vuln.summary}\n{vuln.details[:1500]}\n\n"
         f"Candidates (qualified name, change score): {cands}\n\nFix commit diff (truncated):\n{diff_excerpt[:6000]}"
     )
-    resp = client.models.generate_content(
-        model=config.GEMINI_MODEL, contents=prompt,
-        config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Pick,
-                                           temperature=0))
+    resp = None
+    for model in llm.models():
+        try:
+            resp = client.models.generate_content(
+                model=model, contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=Pick,
+                                                   temperature=0))
+            break
+        except Exception as exc:
+            if not llm.is_quota_error(exc):
+                raise
+            llm.mark_exhausted(model)
+    if resp is None:
+        raise RuntimeError("all Gemini models are out of quota")
     pick = Pick.model_validate_json(resp.text)
     pick.symbols = [s for s in pick.symbols if s in names]
     return pick
@@ -158,18 +169,25 @@ def extract_symbols(vuln: Vuln, cg: CallGraph, force: bool = False) -> dict:
             result["rationale"] = "Fix commit does not touch functions in the analyzed release"
             continue
         result["patch_url"] = url
+        why = ""
         if config.GEMINI_API_KEY:
-            try:
-                pick = _ask_gemini(vuln, patch, cands)
-                if pick.symbols:
-                    result.update(symbols=pick.symbols, confidence=round(pick.confidence, 2), source="gemini",
-                                  rationale=pick.rationale)
+            for attempt in range(3):
+                try:
+                    pick = _ask_gemini(vuln, patch, cands)
+                    if pick.symbols:
+                        result.update(symbols=pick.symbols, confidence=round(pick.confidence, 2), source="gemini",
+                                      rationale=pick.rationale)
+                        break
+                    why = "gemini returned no candidate; "
                     break
-            except Exception as exc:
-                result["rationale"] = f"gemini failed ({exc.__class__.__name__}); used heuristic"
+                except Exception as exc:
+                    why = f"gemini failed ({exc.__class__.__name__}); "
+                    time.sleep(2 * (attempt + 1))
+            if result["source"] == "gemini":
+                break
         top = cands[0]
         result.update(symbols=[top[0]], confidence=0.5, source="heuristic",
-                      rationale=f"Highest-scoring changed function in the fix commit (score {top[1]}); not model-verified")
+                      rationale=f"{why}highest-scoring changed function in the fix commit (score {top[1]}); not model-verified")
         break
     cache[vuln.id] = result
     _save_map(cache)

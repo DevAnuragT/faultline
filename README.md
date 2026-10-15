@@ -91,7 +91,8 @@ OSV API + fix commits                              ──┘   (graph)          
 
 Where Gemini is used: (1) choosing the vulnerable function from a fix-commit diff + deterministic candidate list
 (structured JSON output, results cached in `data/cache/symbol_map.json`); (2) the function-calling triage agent.
-Without `GEMINI_API_KEY` the app runs in an offline mode: heuristic symbol picking (labelled `heuristic`) and a
+Free-tier Gemini quotas are small, so calls walk a model fallback chain (`GEMINI_MODEL`, then `GEMINI_FALLBACK_MODELS`), skipping
+models that are out of quota. Without `GEMINI_API_KEY` the app runs in an offline mode: heuristic symbol picking (labelled `heuristic`) and a
 deterministic answerer over the same tools.
 
 ## Run it
@@ -100,6 +101,7 @@ deterministic answerer over the same tools.
 docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest      # or: docker compose up --build
 uv venv --python 3.12 .venv && uv pip install -r requirements.txt     # any Python 3.11+
 cp .env.example .env     # add GEMINI_API_KEY (optional but recommended); GITHUB_REPO=owner/repo to file real issues
+                         # for a local FalkorDB leave FALKORDB_USERNAME / FALKORDB_PASSWORD empty
 .venv/bin/streamlit run streamlit_app.py                               # first run builds the graph
 ```
 

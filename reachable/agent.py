@@ -1,11 +1,10 @@
 """Gemini function-calling agent. Tools are graph queries; the model explains and proposes, it never decides
 reachability and it cannot execute actions (humans approve those in the UI)."""
-from __future__ import annotations
 
 import re
 import time
 
-from . import actions, analysis, config
+from . import actions, analysis, config, llm
 from .graph import Store
 
 SYSTEM = """You are Reachable, a vulnerability triage agent. Your knowledge comes ONLY from tools that query a
@@ -108,25 +107,38 @@ class Agent:
         self.st = st
         self.box = Toolbox(st)
         self.chat = None
+        self.model = ""
         self.live = bool(config.GEMINI_API_KEY)
         if self.live:
             from google import genai
             from google.genai import types
 
-            self._client = genai.Client(api_key=config.GEMINI_API_KEY)
-            self.chat = self._client.chats.create(
-                model=config.GEMINI_MODEL,
-                config=types.GenerateContentConfig(system_instruction=SYSTEM, tools=self.box.tools(), temperature=0))
+            self._types = types
+            self._client = genai.Client(api_key=config.GEMINI_API_KEY, http_options=types.HttpOptions(timeout=60000))
+            self._new_chat(llm.models()[0])
+
+    def _new_chat(self, model: str, history=None) -> None:
+        self.model = model
+        self.chat = self._client.chats.create(
+            model=model, history=history,
+            config=self._types.GenerateContentConfig(system_instruction=SYSTEM, tools=self.box.tools(), temperature=0))
 
     def ask(self, message: str) -> tuple[str, list[dict]]:
         start = len(self.box.trace)
         if self.live:
-            try:
-                reply = self.chat.send_message(message).text or ""
-                return reply, self.box.trace[start:]
-            except Exception as exc:
-                note = f"(Gemini unavailable: {exc.__class__.__name__}; answering from graph tools directly)\n\n"
-                return note + self._offline(message), self.box.trace[start:]
+            last: Exception | None = None
+            for _ in range(len(config.GEMINI_FALLBACK_MODELS) + 1):
+                try:
+                    reply = self.chat.send_message(message).text or ""
+                    return reply, self.box.trace[start:]
+                except Exception as exc:
+                    last = exc
+                    if not llm.is_quota_error(exc):
+                        break
+                    llm.mark_exhausted(self.model)
+                    self._new_chat(llm.models()[0], history=self.chat.get_history())
+            note = f"(Gemini unavailable: {last.__class__.__name__}; answering from graph tools directly)\n\n"
+            return note + self._offline(message), self.box.trace[start:]
         return self._offline(message), self.box.trace[start:]
 
     # ---- deterministic fallback so the product works without an API key

@@ -14,7 +14,7 @@ services:
     environment:
       FALKORDB_HOST: falkordb
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash}
       GITHUB_REPO: ${GITHUB_REPO:-}
     ports:
       - "8501:8501"

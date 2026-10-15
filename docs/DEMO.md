@@ -3,7 +3,7 @@
 Setup: FalkorDB running, `streamlit run streamlit_app.py`, graph already built, FalkorDB Browser open on :3000.
 
 1. **0:00 The problem (15s).** "Dependency scanners list 33 advisories for this small Flask app. Which ones can an
-   attacker actually reach?" Show the metric row: 33 advisories, 3 reachable, 8 possibly, 18 needs review.
+   attacker actually reach?" Show the metric row: 33 advisories, 4 reachable, 7 possibly, 18 needs review.
 2. **0:15 The proof (40s).** Triage tab, pick GHSA-q2q7-5pp4-w6pg (urllib3). The graph shows
    `GET /preview → fetch_preview → requests.get → … → prepare_url → parse_url`, built from AST of the real packages.
    Point out dashed amber edges for low-confidence links versus solid exact calls.
