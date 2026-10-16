@@ -338,3 +338,28 @@ verification proven, recorded agent conversation, graph seeded in FalkorDB Cloud
 
 **Reproduce everything:** `docker run -d -p 6379:6379 falkordb/falkordb`, `make setup`, `make seed`, `make run`, `make demo`,
 `make test`.
+
+
+---
+
+## Addendum: running it on a real repository (Oct 16)
+
+**Question from the owner:** "can we perform this on a real repo?" The panel had earlier cut a real-repo target to protect the
+schedule; with the closed loop already done and ~2.5 days left, we time-boxed it.
+
+* **Choice:** microblog v0.15 (real Flask app, MIT, 20 routes, 38 pinned packages, 51 advisories). Vendored under `targets/`.
+* **Generalization:** a `Target` (app package dirs + pinned requirements); the active target is recorded on the graph's `Repo`
+  node so verification and actions read it from the graph (no global state, Streamlit serves several sessions). Auto mode
+  parses every pinned package that has advisories.
+* **Resolver gaps found on real code, and fixed:** module-level bindings were invisible, so `jwt.decode` (an alias to a bound
+  method: `decode = _jwt_global_obj.decode`) and Flask's `request: Request = LocalProxy(...)` did not resolve. Resolving
+  module-level aliases and annotated globals made PyJWT and Werkzeug paths appear. The demo's verdicts did not change (snapshot
+  hash did, because more edges are now visible).
+* **A real bug in our own verifier, caught by our own gate:** the candidate graph analysed 0 functions of the upgraded packages,
+  so exposure "dropped to 0" trivially. The coverage gate returned `UNVERIFIED`. Fix: the candidate graph analyses the same package
+  set as the baseline; regression test added.
+* **Result:** 4 reachable, 5 possibly reachable, 18 undecided, 24 no path found; closed loop VERIFIED (9 → 0, coverage retained).
+  Hand-checked: `/reset_password/<token>` → `jwt.decode` → PyJWT `_decode_payload`; `/translate` → `requests.post` → urllib3.
+* **Limits that remain:** the target is vendored (not an arbitrary URL); routes are Flask-decorator based; all routes are treated
+  as public (`login_required` is not modelled); Gemini picks the vulnerable symbol and can be wrong (rationales are shown); the
+  live public site shows the recorded fix for microblog (a live rebuild takes minutes).

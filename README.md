@@ -44,6 +44,29 @@ Of 33 advisories, 11 are exposed. The closed loop takes that to 0 exposed with a
 
 The naive plan says "bump urllib3 to 2.6.3". The graph rejects it: `requests 2.25.1 requires urllib3<1.27` (a constraint stored on a `DEPENDS_ON` edge). The planner finds the co-upgrade (`requests 2.33.0`), the candidate set is built into a scratch graph and re-triaged: **11 exposed → 0, no new exposure, coverage retained** (e.g. urllib3 479 → 512 analysed functions). Only then is a draft PR proposed. If coverage had dropped, the status would be `UNVERIFIED`, never "fixed".
 
+## It also runs on a real repository
+
+The pipeline is not tied to the demo app. A *target* is just an app's package directories plus its pinned requirements,
+and in "auto" mode every pinned dependency that has advisories is parsed. The repo ships one real target:
+**[microblog v0.15](https://github.com/miguelgrinberg/microblog/tree/v0.15)** (Miguel Grinberg's Flask app, MIT, vendored under
+`targets/microblog/`): 20 routes, 38 pinned packages, 13 of them analysed from source.
+
+| | Result on microblog |
+|---|---|
+| Graph | 9,587 functions, ~11.7k call edges, 51 advisories |
+| Verdicts | 4 `REACHABLE`, 5 `POSSIBLY_REACHABLE`, 18 `NEEDS_REVIEW`, 24 `NO_STATIC_PATH` |
+| Closed loop | `VERIFIED`: 9 exposed → 0, no new exposure, coverage retained (urllib3 386 → 520, PyJWT 118 → 134 analysed functions) |
+
+Two exposed findings, checked by hand against the source: `POST /translate` → `translate()` → `requests.post` → `requests`/`urllib3`
+internals, and `GET/POST /reset_password/<token>` → `User.verify_reset_password_token` → `jwt.decode` → PyJWT `_decode_payload`
+(an unauthenticated route reaching a real PyJWT advisory). Run it: `python -m reachable.cli seed --target microblog`, then pick
+it in the sidebar. `RUN_REAL_REPO=1 make test` runs it end to end.
+
+Running it on a real repo also caught a real bug in the verifier: the candidate graph only parsed packages that *have* advisories, so
+the upgraded (now clean) `requests`/`urllib3`/`PyJWT` vanished from it and "9 exposed → 0" looked like a success. The coverage
+gate flagged it as `UNVERIFIED` (0 analysed functions); the fix is that a candidate graph must analyse the same packages as the
+baseline (`tests/test_verify.py`).
+
 ## Why FalkorDB is essential
 
 * **The verdict is a path query** over a code graph joined to dependency and advisory nodes. The product has no other way to decide.
@@ -126,6 +149,7 @@ docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest        # or: do
 make setup                                                              # venv + dependencies (Python 3.11+)
 cp .env.example .env     # GEMINI_API_KEY (optional); leave FALKORDB_USERNAME/PASSWORD empty for local
 make seed                # builds the graph, runs the closed loop, records the what-if and the agent conversation
+python -m reachable.cli seed --target microblog   # the real-repo target (a few minutes the first time)
 make run                 # Streamlit UI
 make demo                # clean ingest in a throwaway graph; prints every number used above
 make test                # the full test suite (needs the local FalkorDB)
