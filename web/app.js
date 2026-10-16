@@ -160,7 +160,7 @@ async function loadOverview() {
   const max = top ? top.share_pct : 1;
   $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x, i) => `<tr class="${i === 0 ? "lead" : ""}">
     <td class="num rank">${i + 1}</td>
-    <td><div class="owner-name">${esc(x.service)} <span class="op">${esc(x.op)}${x.peer ? ` → ${esc(x.peer)}` : ""}</span></div>${x.code ? `<span class="owner-code">${codeLink(x.code)}</span>` : ""}</td>
+    <td><div class="owner-name">${esc(x.service)} <span class="op">${esc(x.op)}${x.peer ? ` → ${esc(x.peer)}` : ""}</span></div>${x.code ? `<span class="owner-code">${codeLink(x.code)}${readCodeBtn(x.service, x.op)}</span>` : ""}</td>
     <td data-sort-value="${x.share_pct}"><div class="share"><span class="bar"><i style="width:${Math.max(2, 100 * x.share_pct / max)}%"></i></span><span class="pct">${x.share_pct}%</span></div></td>
     <td class="num">${fmt(x.per_request_ms)}</td></tr>`).join("") || `<tr><td colspan="4">${empty("No critical-path data", "This window has no steady-state traces to attribute.")}</td></tr>`;
 
@@ -416,7 +416,8 @@ function actionCard(a) {
   const status = job?.status === "running" ? "running" : a.status;
   return `<article class="card${a.status === "proposed" && !job ? " pending" : ""}"><div class="card-head">${statusPill(status)}<h4 class="card-title">${nice(a.title)}</h4>${ago(a.ts)}</div>
     <p class="card-text">${nice(a.rationale)}</p>
-    <div class="meta-line"><span class="tag">${esc(a.type || "action")}</span><span class="idm">${esc(a.id)}${copyBtn(a.id, "action id")}</span><span class="idm"><span class="fp" tabindex="0" data-help="evidence-hash">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span>${copyBtn(a.hash, "evidence hash")}</span></div>
+    ${a.type === "code_change" && a.body ? diffBlock(a.body) : ""}
+    <div class="meta-line"><span class="tag">${esc((a.type || "action").replace(/_/g, " "))}</span><span class="idm">${esc(a.id)}${copyBtn(a.id, "action id")}</span><span class="idm"><span class="fp" tabindex="0" data-help="evidence-hash">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span>${copyBtn(a.hash, "evidence hash")}</span></div>
     ${a.status === "proposed" && !job ? `<div class="actions"><button class="btn primary small" data-approve="${a.id}" ${lock()}>Approve and run</button><button class="btn small" data-reject="${a.id}" ${lock()}>Reject</button>${state.meta.public ? `<span class="locked"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Turned off in the read-only demo</span>` : ""}</div>` : ""}
     ${job?.log?.length ? `<div class="log-head">${job.status === "running" ? `<i class="live" aria-hidden="true"></i>Live log` : "Log"}</div><pre class="log" aria-live="polite">${esc(job.log.join("\n"))}</pre>` : ""}
     ${resultView(a.result || job?.result)}</article>`;
@@ -875,7 +876,8 @@ async function loadNextSteps() {
   $("#next-count").innerHTML = steps.length ? `<b>${steps.length}</b> step${steps.length === 1 ? "" : "s"}` : "";
   $("#next-steps").innerHTML = steps.map((st) => {
     const [kind, tone, verb] = ACTION[st.type] || [st.type, "muted", "Propose"];
-    const act = !st.payload ? `<span class="no-act" title="No actuator in this environment: the change is made in code"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>code change</span><a class="btn small" href="#experiments">See remedies</a>`
+    const rem = st.type === "advice" ? (p.remedies || []).find((r) => !r.actuator && String(st.title).includes(`${r.service} ${r.op}`)) : null;
+    const act = !st.payload ? `<span class="no-act" title="No actuator in this environment: the change is made in code"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>code change</span>${rem ? readCodeBtn(rem.service, rem.op, true) : ""}<a class="btn small" href="#experiments">See remedies</a>`
       : pending(st.payload) ? `<span class="pill wait"><i></i>awaiting approval</span><a class="btn small" href="#approvals">Review in Approvals</a>`
       : `<button class="btn small${st.type === "issue" ? " primary" : ""}" type="button" data-next="${esc(JSON.stringify(st.payload))}" ${lock()}>${esc(verb || "Propose")}</button>`;
     const extra = st.type === "issue" && st.payload?.window && st.payload.window !== w ? `<p class="step-extra"><a class="linkish" href="#findings?w=${encodeURIComponent(st.payload.window)}">Open that window</a></p>` : "";
@@ -1096,6 +1098,45 @@ document.addEventListener("click", (e) => {
   if (t) { const box = t.nextElementSibling, open = box.hidden; box.hidden = !open; t.setAttribute("aria-expanded", String(open)); t.textContent = open ? "Hide query" : "Show query"; return; }
   const r = e.target.closest?.("[data-run-cypher]");
   if (r) { e.preventDefault(); state.pendingCypher = r.dataset.runCypher; go("graph"); }
+});
+
+/* ---------- code: read the function behind an operation, then let the agent propose the change ---------- */
+const readCodeBtn = (service, op, asButton = false) => `<button type="button" class="${asButton ? "btn small" : "linkish read-code"}" data-read-code="${esc(JSON.stringify([service, op]))}">${asButton ? "Read the code" : "Read the code"}</button>`;
+function diffBlock(patch) {
+  const rows = String(patch).replace(/\n$/, "").split("\n").map((ln) => {
+    const k = ln.startsWith("+++") || ln.startsWith("---") ? "meta" : ln.startsWith("@@") ? "hunk" : ln.startsWith("+") ? "add" : ln.startsWith("-") ? "del" : "ctx";
+    return `<span class="dl ${k}">${esc(ln) || " "}</span>`;
+  }).join("");
+  const add = (patch.match(/^\+(?!\+\+)/gm) || []).length, del = (patch.match(/^-(?!--)/gm) || []).length;
+  return `<div class="diff-wrap"><div class="diff-head"><span class="mono">patch</span><span class="d-add">+${add}</span><span class="d-del">−${del}</span>${copyBtn(patch, "patch")}</div><pre class="diff" tabindex="0" aria-label="Proposed patch">${rows}</pre></div>`;
+}
+const drawer = $("#code-drawer");
+async function readCode(service, op) {
+  state.codeFor = [service, op];
+  $("#cd-title").textContent = `${service} ${op}`;
+  $("#cd-sub").textContent = "Reading the code…";
+  $("#cd-body").innerHTML = `<span class="skel"></span><span class="skel"></span><span class="skel short"></span>`;
+  $("#cd-repo").hidden = true;
+  if (!drawer.open) drawer.showModal();
+  let r;
+  try { r = await api(`/api/source?service=${encodeURIComponent(service)}&op=${encodeURIComponent(op)}`); } catch (e) { r = { error: e.message }; }
+  if (state.codeFor[0] !== service || state.codeFor[1] !== op) return;
+  if (r.error) { $("#cd-sub").textContent = `${service} ${op}`; $("#cd-body").innerHTML = empty("Could not read the code", esc(r.error), "alert"); return; }
+  $("#cd-title").textContent = r.function || `${service} ${op}`;
+  $("#cd-sub").innerHTML = `<span class="mono">${esc(r.file)}</span>${r.start_line ? ` · lines ${r.start_line}–${r.end_line}` : ""}${copyBtn(`${r.file}${r.start_line ? `:${r.start_line}` : ""}`, "file and line")}`;
+  const lines = String(r.code || "").split("\n");
+  $("#cd-body").innerHTML = `${r.why ? `<p class="cd-why"><span class="k">Why the graph points here</span>${esc(cap(r.why))}.</p>` : ""}
+    <pre class="src" tabindex="0" aria-label="Source of ${esc(r.function || op)}">${lines.map((ln, i) => `<span class="sl"><span class="ln" aria-hidden="true">${(r.start_line || 1) + i}</span>${esc(ln) || " "}</span>`).join("")}</pre>`;
+  if (r.url) { $("#cd-repo").href = r.url; $("#cd-repo").hidden = false; }
+}
+document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-read-code]"); if (b) { e.preventDefault(); const [sv, op] = JSON.parse(b.dataset.readCode); readCode(sv, op); } });
+drawer.addEventListener("click", (e) => { if (e.target === drawer || e.target.closest("[data-close]")) drawer.close(); });
+$("#cd-ask").addEventListener("click", () => {
+  const [service, op] = state.codeFor || [];
+  if (!service) return;
+  drawer.close();
+  if (route().view !== "agent") go("agent");
+  ask(`What should change in the code behind ${service} ${op}? Read it first, then propose it with propose_code_change.`);
 });
 
 boot().catch((e) => {
