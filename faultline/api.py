@@ -84,6 +84,11 @@ def ledger():
                        "next_owner": r[5], "before": r[6], "after": r[7], "ts": r[8]} for r in fx]}
 
 
+@app.get("/api/incidents")
+def incidents():
+    return {"incidents": analysis.incidents(st())}
+
+
 @app.get("/api/compare")
 def compare(a: str, b: str):
     return planner.diff_windows(st(), a, b)
@@ -99,6 +104,8 @@ class Proposal(BaseModel):
     target: str = ""
     flags: str = ""
     hop: str = ""
+    window: str = ""
+    subject: str = ""
     rationale: str = ""
 
 
@@ -111,7 +118,11 @@ def propose(p: Proposal):
         return actions.propose_fix(s, p.flags.split(), p.rationale)
     if p.type == "guardrail":
         return actions.propose_guardrail(s, p.hop, p.rationale)
-    raise HTTPException(400, "type must be experiment, fix or guardrail")
+    if p.type == "issue":
+        return actions.propose_issue(s, p.window, p.rationale)
+    if p.type == "pr":
+        return actions.propose_pr(s, p.subject, p.rationale)
+    raise HTTPException(400, "type must be experiment, fix, guardrail, issue or pr")
 
 
 @app.post("/api/actions/{action_id}/approve")

@@ -84,6 +84,23 @@ path computed per trace and stored on spans, `percentileDisc` per window (steady
 recorded HotROD trace set, approval ledger (stale and tampered evidence refused, public mode cannot propose or execute,
 REFUTED-until-reviewed planner gate), and the HTTP API: overview, critical chain and waterfall, planner, offline agent, proposals, public-mode refusals, read-only Cypher.
 
+## From finding to pull request
+
+Every change the agent proposes can leave the graph as something a team reviews:
+
+- **Draft PR** (`propose_pr <fix id | guardrail action id | experiment id>`): a VERIFIED fix becomes `deploy/docker-compose.fix.yml`
+  plus a gate report under `docs/changes/`; an approved guardrail becomes its Istio policy YAML plus a note; an experiment that
+  regressed the endpoint becomes an incident report under `docs/incidents/`. With `GITHUB_REPO=owner/repo` and the GitHub CLI
+  logged in, approval creates the branch, commits the files through the API and opens a draft PR; without it, the files and the
+  PR body are written under `out/pr/`.
+- **Incident issue** (`propose_incident_issue <window>`): any window whose failure rate or p95 regressed against the steady-state
+  window becomes an issue with the before/after table, the owner that moved, the hop and the code to look at, and the worst trace.
+- **Code pointers**: spans carry OpenTelemetry's `code.function.name` / `code.file.path` / `code.line.number` when the
+  instrumentation emits them; for HotROD, which does not, an explicit source map (`faultline/code.py`) names the file and function
+  behind each operation and the config symbol behind each flag. The site links them; the agent cites them; nothing is guessed.
+
+Approval for all of these is the same hashed-evidence path as experiments and fixes, and public mode refuses them.
+
 ## The agent's model
 
 The agent runs on whichever provider has credentials, in this order: **Claude** (`ANTHROPIC_API_KEY`; model `claude-opus-5-5`,
@@ -99,4 +116,4 @@ only the prose differs. Every tool call is recorded and shown.
 {"mcpServers": {"faultline": {"command": "python", "args": ["-m", "faultline.mcp_server"], "cwd": "/path/to/faultline"}}}
 ```
 
-Thirteen tools: everything the agent can read or propose, nothing that executes.
+Eighteen tools: everything the agent can read or propose, nothing that executes.

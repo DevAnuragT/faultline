@@ -15,6 +15,9 @@ Stack up (`make up`), a baseline ingested (`make baseline`), the site running (`
    proposal. Approve in Actions. Customer restarts with `-M`, 40 requests, new window, four gates: **VERIFIED, p50 1191
    to 788 ms**, and the graph names the next owner. "Nothing ran without the click, the approval is bound to a hash of
    the evidence, and a rejected fix rolls itself back."
+   Then "Propose draft PR" on the verified fix and approve: the compose override and the gate report become a draft PR (or land
+   under `out/pr/` without a GitHub repo configured). In Incidents, the paused-route window reads as an incident with the hop
+   and the code pointer; one click proposes the issue.
 4. **Why FalkorDB (2:00–2:30).** Graph tab: the critical-path query, the betweenness call, the blast-radius path
    query, the prediction-vs-outcome query. "Spans, windows, experiments, fixes and approvals are one graph, so the
    agent's memory and its evidence are the same thing."

@@ -57,7 +57,8 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
                          "error": s["error"], "status": str(s["status"] or ""), "critical": s["id"] in on_path,
                          "self_us": self_us.get(s["id"], 0),
                          # the service a client span waits on: its server child, or the address it dialled when nobody answered
-                         "peer": peer.get(s["id"]) or (s["attrs"].get("server.address", "") if s["kind"] == "client" else ""), "proto": s["proto"]})
+                         "peer": peer.get(s["id"]) or (s["attrs"].get("server.address", "") if s["kind"] == "client" else ""), "proto": s["proto"],
+                         "code": s.get("code", "")})
             p = by_id.get(s["parent"]) if s["parent"] else None
             if p is not None and p["service"] != s["service"]:
                 svc_edges[(p["service"], s["service"])].append(s)
@@ -72,7 +73,7 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
                 MERGE (s)-[:EXPOSES]->(o)
                 CREATE (sp:Span {id:r.id, trace:$id, window:$w, service:r.service, op:r.op, start_us:r.start_us,
                                  duration_us:r.duration_us, kind:r.kind, error:r.error, status:r.status,
-                                 critical:r.critical, self_us:r.self_us, parent:r.parent, peer:r.peer, proto:r.proto})-[:OF]->(t)
+                                 critical:r.critical, self_us:r.self_us, parent:r.parent, peer:r.peer, proto:r.proto, code:r.code})-[:OF]->(t)
                 CREATE (sp)-[:ON]->(o)""",
              {"w": wid, "id": t["id"], "root": root["op"], "rs": root["service"], "d": root["duration_us"] / 1000,
               "status": str(root["status"] or ""), "errors": errors, "start": root["start_us"], "rows": rows})

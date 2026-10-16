@@ -97,3 +97,35 @@ def test_agent_prefers_claude_when_a_key_is_present_and_degrades_to_graph_tools(
     if "APIConnectionError" in reply:
         pytest.skip("no network")
     assert reply.startswith("(Claude unavailable: AuthenticationError") and trace[0]["tool"] == "overview" and "mysql" in reply
+
+
+def test_incident_issue_and_pr_proposals(st, tmp_path, monkeypatch):
+    from faultline import code
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    (tmp_path / "docker-compose.yml").write_text((Path(__file__).parent.parent / "docker-compose.yml").read_text())
+    traces = [normalise(t) for t in json.loads(FIX.read_text())["data"]]
+    healthy = [t for t in traces if max(s["duration_us"] for s in t["spans"]) < 5_000_000]
+    base_w = ingest.ingest_window(st, "baseline", traces=healthy, progress=lambda *_: None)["window"]
+    bad_w = ingest.ingest_window(st, "pause-route", traces=traces, progress=lambda *_: None)["window"]
+    inc = analysis.incident(st, bad_w)
+    assert inc and inc["endpoint"] == "GET /dispatch" and inc["kind"] == "failures" and inc["baseline"] == base_w
+    assert inc["owner"]["service"] == "frontend" and inc["hop"] == "frontend -> route" and inc["worst_trace"]["duration_ms"] > 10000
+    assert code.pointer("mysql", "SQL SELECT")["file"].endswith("database.go") and code.pointer("nope", "x") is None
+    assert analysis.incident(st, base_w) is None
+    assert actions.propose_issue(st, base_w)["ok"] is False
+    p = actions.propose_issue(st, bad_w)
+    assert p["ok"]
+    r = actions.approve(st, p["action"])
+    assert r["ok"] and r["written"].endswith(f"{bad_w}.md") and "frontend -> route" in (tmp_path / r["written"]).read_text()
+    # a PR for an approved guardrail
+    g = actions.propose_guardrail(st, "frontend -> route"); actions.approve(st, g["action"])
+    pr = actions.propose_pr(st, g["action"])
+    assert pr["ok"] and "2 files" in pr["title"]
+    assert actions.propose_pr(st, "nothing-here")["ok"] is False
+    r = actions.approve(st, pr["action"])
+    assert r["ok"] and set(r["files"]) == {"deploy/guardrails/frontend_to_route.yaml", f"docs/changes/{g['action']}.md"}
+    assert (tmp_path / r["written"] / "PR_BODY.md").exists()
+    # a PR for a VERIFIED fix recorded in the graph
+    st.q("MATCH (b:Window {id:$b}), (a:Window {id:$a}), (s:Service {name:'customer'}) CREATE (f:Fix {id:'fix-t', service:'customer', flags:'-M', verdict:'VERIFIED', gates:['PASS x'], next_owner:'n', ts:1})-[:TARGETS]->(s) CREATE (f)-[:BEFORE]->(b) CREATE (f)-[:AFTER]->(a)", {"b": base_w, "a": bad_w})
+    pr2 = actions.propose_pr(st, "fix-t"); r2 = actions.approve(st, pr2["action"])
+    assert r2["ok"] and "deploy/docker-compose.fix.yml" in r2["files"] and "-M" in (tmp_path / r2["written"] / "deploy/docker-compose.fix.yml").read_text()

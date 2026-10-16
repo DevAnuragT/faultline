@@ -158,6 +158,11 @@ the shortest call path from the edge into it, the protocol of each hop as instru
 traces and is reported as "no TLS attribute recorded", never as "plaintext"), and the calls per request into the store.
 An MCP server exposes all thirteen read/propose tools to other agents; execution stays behind approval.
 
+Added later on Oct 16: **draft PRs** for every approved change (compose override + gate report, guardrail YAML + note,
+incident report), **incident issues** for any window that regressed against steady state (before/after table, the owner that
+moved, hop, code pointer, worst trace), and **code pointers** from OpenTelemetry code attributes with an explicit source map
+for HotROD. The agent's offline path and the site expose all three.
+
 Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
 `-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing

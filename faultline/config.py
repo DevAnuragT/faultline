@@ -31,3 +31,5 @@ GEMINI_FALLBACK_MODELS = [m.strip() for m in os.environ.get(
     "GEMINI_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-3.5-flash-lite").split(",") if m.strip()]
 PUBLIC_MODE = os.environ.get("FAULTLINE_PUBLIC", "").lower() in ("1", "true", "yes")
 EDGE_SERVICES = [s.strip() for s in os.environ.get("EDGE_SERVICES", ROOT_SERVICE).split(",") if s.strip()]
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "")        # owner/repo: PRs and issues are opened there; empty = written under out/
+GITHUB_BASE = os.environ.get("GITHUB_BASE", "faultline")

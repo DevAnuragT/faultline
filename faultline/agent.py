@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import actions, analysis, config, experiments, ingest, llm, planner
+from . import actions, analysis, code, config, experiments, ingest, llm, planner
 from .graph import Store
 
 SYSTEM = """You are Faultline, a reliability agent. Your only knowledge of the system comes from tools that query a
@@ -27,6 +27,10 @@ Rules:
 - When asked about security, exposure, attack surface or data stores: call attack_surface and report paths and hops;
   never claim a hop is encrypted or unencrypted, only that no TLS attribute was recorded.
 - history is your memory across sessions: check it before proposing something that was already tried.
+- When asked about downtime, outages, regressions or "what went wrong": call incidents; for each one name the endpoint,
+  the numbers before and after, the owner that moved, the hop and the code pointer; offer propose_incident_issue.
+- After a fix is VERIFIED or a guardrail action is done, offer propose_pr with its id so the change leaves the graph as a
+  reviewable draft PR. When asked where in the code a problem is, call code_pointer; if it returns an error say so.
 - If a tool returns {"error": ...}, quote that error. Never claim a tool failed or was unavailable unless its result
   says so, and never describe an action you did not call a tool for.
 - Be concise: short paragraphs or bullets, no filler, no praise."""
@@ -149,6 +153,34 @@ class Toolbox:
         self._log("propose_guardrail", {"hop": hop}, res)
         return res
 
+    def incidents(self) -> list[dict]:
+        """Windows that read as incidents against the current steady state (failure rate up, or p95 > 1.5x baseline), with
+        the owner that moved, the hop to look at, the code pointer and the worst trace."""
+        res = analysis.incidents(self.st)
+        self._log("incidents", {}, res)
+        return res
+
+    def code_pointer(self, service: str, op: str) -> dict:
+        """Where in the source an operation lives: the span's own OpenTelemetry code attributes when present, otherwise the
+        demo app's source map. Returns {"error"} when nothing is known; never guess a file."""
+        res = code.pointer(service, op) or {"error": f"no code pointer known for {service} {op}"}
+        self._log("code_pointer", {"service": service, "op": op}, res)
+        return res
+
+    def propose_incident_issue(self, window: str, rationale: str = "") -> dict:
+        """Propose (not file) an incident issue for a window that regressed against steady state. A human approves; the
+        issue carries the before/after numbers, the owner that moved, the hop and code to look at, and the worst trace."""
+        res = actions.propose_issue(self.st, window, rationale)
+        self._log("propose_incident_issue", {"window": window}, res)
+        return res
+
+    def propose_pr(self, subject: str, rationale: str = "") -> dict:
+        """Propose (not open) a draft pull request for a VERIFIED fix id (compose override + gate report), an approved
+        guardrail action id (policy YAML + note) or an experiment id (incident report). A human approves."""
+        res = actions.propose_pr(self.st, subject, rationale)
+        self._log("propose_pr", {"subject": subject}, res)
+        return res
+
     def query_graph(self, cypher: str) -> dict:
         """Run a READ-ONLY Cypher query (labels: Service, Operation, Window, Trace, Span, Finding, Experiment, Fix,
         Action; edges: EXPOSES, CALLS{window}, INVOKES{window}, IN, OF, CHILD_OF, ON, ABOUT, TARGETS, BASELINE,
@@ -183,7 +215,7 @@ class Toolbox:
 
     def _raw_tools(self) -> list:
         return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.next_fix, self.guardrails,
-                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.query_graph]
+                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.incidents, self.code_pointer, self.propose_incident_issue, self.propose_pr, self.query_graph]
 
 
 class Agent:
@@ -259,6 +291,18 @@ class Agent:
                         f"action {p.get('action')} awaiting approval."
                         + (f" Note: a previous attempt was {prev['verdict']}" + (f" on: {'; '.join(prev['failed_gates'])}" if prev["failed_gates"] else "") + "." if prev else ""))
             return f"Top owner: {analysis.label(top)} at {top['share_pct']}%; no known knob targets it."
+        if any(k in m for k in ("wrong", "incident", "outage", "downtime", "regress", "file")):
+            incs = self.box.incidents()
+            if not incs:
+                return "No window regressed against the current steady state."
+            i = incs[0]; o = i.get("owner") or {}; c = o.get("code") or {}
+            p = self.box.propose_incident_issue(i["window"])
+            return (f"Incident in window {i['window']} ({i['label']}): {i['endpoint']} failure rate {i['fail_rate'][0]:.0%} → {i['fail_rate'][1]:.0%}, "
+                    f"p95 {i['p95_ms'][0]:.0f} → {i['p95_ms'][1]:.0f} ms. What moved: {analysis.label(o) if o else 'unknown'} "
+                    f"({o.get('baseline_per_request_ms', 0):.0f} → {o.get('per_request_ms', 0):.0f} ms per request). Look at {i['hop']}"
+                    + (f"; code {c.get('location') or c.get('file')}" + (f" ({c['function']})" if c.get("function") else "") if c else "")
+                    + f". Worst request {i['worst_trace']['id']} at {i['worst_trace']['duration_ms']:.0f} ms. "
+                    + (f"Proposed incident issue {p.get('action')} awaiting approval." if p.get("ok") else p.get("error", "")))
         if any(k in m for k in ("chaos", "experiment", "break", "resilien", "timeout")):
             r = self.box.rank_experiments(); g = self.box.guardrails()
             best = next((x for x in r if not x["skip"]), None)

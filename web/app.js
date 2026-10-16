@@ -74,7 +74,7 @@ async function loadOverview() {
   $("#s-failed").textContent = h.traces ? `${h.failed} / ${h.traces}` : "—"; $("#s-failrate").textContent = h.traces ? pct(h.fail_rate) : "";
   $("#s-owner").textContent = top ? label(top) : "—"; $("#s-owner-share").textContent = top ? `${top.share_pct}% · ${fmt(top.per_request_ms)} ms per request` : "";
   const max = top ? top.share_pct : 1;
-  $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x) => `<tr><td class="barcell"><span class="bar" style="width:${Math.max(2, 72 * x.share_pct / max)}px"></span></td><td>${esc(label(x))}</td><td class="num">${x.share_pct}%</td><td class="num">${fmt(x.per_request_ms)}</td></tr>`).join("");
+  $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x) => `<tr><td class="barcell"><span class="bar" style="width:${Math.max(2, 72 * x.share_pct / max)}px"></span></td><td>${esc(label(x))}</td><td class="num">${x.share_pct}%</td><td class="num">${fmt(x.per_request_ms)}</td><td class="mono">${codeLink(x.code)}</td></tr>`).join("");
   $("#findings-list").innerHTML = o.findings.map((f) => `<li class="${f.severity}"><span class="stripe"></span><span class="kind">${esc(f.kind.replace(/_/g, " "))}</span><span class="text">${esc(f.detail)}</span></li>`).join("") || `<li class="empty">No findings in this window.</li>`;
   $("#exposure tbody").innerHTML = o.exposure.map((e) => `<tr><td><b>${esc(e.store)}</b> <span class="hint">${esc(e.store_kind)}</span></td><td class="mono">${esc(e.path)}</td><td class="mono">${e.protocols.map((p) => esc(p || "?")).join(" / ")}</td><td class="num">${e.calls_per_request_into_store}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">No data store reached from the edge in this window.</td></tr>`;
   $("#guardrails tbody").innerHTML = o.guardrails.map((g) => `<tr><td class="mono">${esc(g.hop)}</td><td>${esc(g.kind)}</td><td class="mono">${esc(g.value)}</td><td>${esc(g.evidence)}</td><td>${g.priority === "high" && g.kind === "timeout" ? `<button class="btn small" data-propose-guardrail="${esc(g.hop)}" ${state.meta.public ? "disabled" : ""}>Propose</button>` : ""}</td></tr>`).join("");
@@ -83,6 +83,12 @@ async function loadOverview() {
   drawGraph(o);
 }
 
+function codeLink(c) {
+  if (!c) return "";
+  if (c.location) return `<span title="from span attributes">${esc(c.location)}</span>`;
+  const text = `${c.file.split("/").pop()}${c.function ? " · " + c.function : ""}`;
+  return c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener" title="${esc(c.why || "")}">${esc(text)}</a>` : esc(text);
+}
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 function drawGraph(o) {
@@ -153,7 +159,15 @@ async function loadExperiments() {
   $("#experiments-list").innerHTML = l.experiments.map((e) => `<div class="entry"><div class="head">${V(e.verdict)}<b>pause ${esc(e.target)}</b><span class="hash">${esc(e.baseline)} → ${esc(e.observed)}</span><span class="when">${when(e.ts)}</span></div>
     <dl><dt>Hypothesis</dt><dd>${esc(e.hypothesis)}</dd><dt>Observed</dt><dd>${e.impact.map((x) => `${esc(x.op)}: ${pct(x.fail_rate)} failed, p50 ${fmt(x.p50_ms)} ms, ${x.failed_fast ? "failed fast" : "<b>hung</b>"}`).join("; ") || "—"}</dd><dt>Lesson</dt><dd>${esc(e.lesson)}</dd></dl></div>`).join("") || `<div class="empty">No experiment yet. Propose one above.</div>`;
   $("#fixes").innerHTML = l.fixes.map((f) => `<div class="entry"><div class="head">${V(f.verdict)}<b class="mono">${esc(f.flags)}</b> on ${esc(f.service)}<span class="hash">${esc(f.before)} → ${esc(f.after)}</span><span class="when">${when(f.ts)}</span></div>
-    <ul class="gates">${f.gates.map((g) => `<li class="${g.passed ? "" : "fail"}">${esc(g.text)}</li>`).join("")}</ul><div class="hint">Next: ${esc(f.next_owner || "—")}</div></div>`).join("") || `<div class="empty">No fix yet.</div>`;
+    <ul class="gates">${f.gates.map((g) => `<li class="${g.passed ? "" : "fail"}">${esc(g.text)}</li>`).join("")}</ul><div class="row"><span class="hint">Next: ${esc(f.next_owner || "—")}</span>${f.verdict === "VERIFIED" ? `<button class="btn small" data-propose-pr="${f.id}" ${state.meta.public ? "disabled" : ""}>Propose draft PR</button>` : ""}</div></div>`).join("") || `<div class="empty">No fix yet.</div>`;
+  $$("[data-propose-pr]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "pr", subject: b.dataset.proposePr }); toast(r.ok ? `Proposed ${r.action}: ${r.title}. Approve it under Approvals.` : r.error); pollActions(); }));
+  const inc = await api("/api/incidents");
+  $("#incidents").innerHTML = inc.incidents.map((i) => `<div class="entry"><div class="head"><span class="pill bad">${esc(i.kind)}</span><b>${esc(i.endpoint)}</b> in <span class="mono">${esc(i.label)} · ${esc(i.window)}</span><span class="when">${i.traces} traces</span></div>
+    <dl><dt>Failure rate</dt><dd>${pct(i.fail_rate[0])} → <b>${pct(i.fail_rate[1])}</b></dd><dt>p95</dt><dd>${fmt(i.p95_ms[0])} → <b>${fmt(i.p95_ms[1])}</b> ms</dd>
+    ${i.owner ? `<dt>What moved</dt><dd>${esc(label(i.owner))}: ${fmt(i.owner.baseline_per_request_ms)} → ${fmt(i.owner.per_request_ms)} ms per request ${i.owner.code ? `· ${codeLink(i.owner.code)}` : ""}</dd>` : ""}
+    ${i.hop ? `<dt>Where to look</dt><dd class="mono">${esc(i.hop)}</dd>` : ""}${i.worst_trace ? `<dt>Worst request</dt><dd class="mono">${esc(i.worst_trace.id)} · ${fmt(i.worst_trace.duration_ms)} ms · status ${esc(i.worst_trace.status || "none")}</dd>` : ""}</dl>
+    <div class="row"><button class="btn small" data-propose-issue="${i.window}" ${state.meta.public ? "disabled" : ""}>Propose incident issue</button></div></div>`).join("") || `<div class="empty">No window regressed against the current steady state.</div>`;
+  $$("[data-propose-issue]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "issue", window: b.dataset.proposeIssue }); toast(r.ok ? `Proposed ${r.action}. Approve it under Approvals.` : r.error); pollActions(); }));
   loadCompare();
 }
 async function loadCompare() {
@@ -212,6 +226,10 @@ function resultView(r) {
       + (r.gates ? `<ul class="gates">${r.gates.map((g) => `<li class="${g.passed ? "" : "fail"}">${esc(g.name)}: ${esc(g.detail)}</li>`).join("")}</ul>` : "")
       + (r.lesson ? `<div>${esc(r.lesson)}</div>` : "") + (r.next_owner ? `<div class="hint">Next: ${esc(r.next_owner)}</div>` : "");
   }
+  if (r.opened) return `<div>Opened draft PR <a href="${esc(r.opened)}" target="_blank" rel="noopener">${esc(r.opened)}</a> with ${r.files.length} files.</div>`;
+  if (r.filed) return `<div>Filed <a href="${esc(r.filed)}" target="_blank" rel="noopener">${esc(r.filed)}</a>.</div>`;
+  if (r.written && r.files) return `<div>Wrote <span class="mono">${esc(r.written)}</span>: ${r.files.map((f) => `<span class="mono">${esc(f)}</span>`).join(", ")}. <span class="hint">${esc(r.note || "")}</span></div>`;
+  if (r.written && r.title) return `<div>Wrote <span class="mono">${esc(r.written)}</span>. <span class="hint">${esc(r.note || "")}</span></div>`;
   if (r.written) return `<div>Wrote <span class="mono">${esc(r.written)}</span> (${esc(r.timeout)} timeout, bounded retries).</div>`;
   if (r.error) return `<div class="hint">${esc(r.error)}</div>`;
   return `<pre class="log">${esc(JSON.stringify(r, null, 1))}</pre>`;

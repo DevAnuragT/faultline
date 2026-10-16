@@ -18,11 +18,12 @@ def critical_owners(st: Store, window: str, root_op: str | None = None, include_
         UNWIND ts AS t
         MATCH (s:Span {critical:true})-[:OF]->(t)
         WITH s.service AS service, s.op AS op, s.peer AS peer, sum(s.self_us)/1000.0 AS owned_ms, count(s) AS spans, total, n,
-             sum(CASE WHEN s.error THEN 1 ELSE 0 END) AS errors
-        RETURN service, op, peer, owned_ms, 100.0*owned_ms/total AS share, spans, errors, owned_ms/n ORDER BY owned_ms DESC""",
+             sum(CASE WHEN s.error THEN 1 ELSE 0 END) AS errors, head(collect(s.code)) AS code
+        RETURN service, op, peer, owned_ms, 100.0*owned_ms/total AS share, spans, errors, owned_ms/n, code ORDER BY owned_ms DESC""",
         {"w": window, "root": root_op, "hangs": include_hangs, "f": HANG_FACTOR})
+    from . import code
     return [{"service": r[0], "op": r[1], "peer": r[2] or "", "owned_ms": round(r[3], 1), "share_pct": round(r[4], 1), "spans": r[5],
-             "errors": r[6], "per_request_ms": round(r[7], 1)} for r in rows]
+             "errors": r[6], "per_request_ms": round(r[7], 1), "code": code.pointer(r[0], r[1], r[8] or "")} for r in rows]
 
 
 def label(o: dict) -> str:
@@ -170,13 +171,64 @@ def trace_waterfall(st: Store, trace_id: str) -> dict:
     return {"trace": trace_id, "root": rows[0][1], "duration_ms": round(rows[0][0], 2), "spans": spans}
 
 
+def incident(st: Store, window: str, baseline: str | None = None) -> dict | None:
+    """Is this window an incident against the steady state? Failure rate up, or p95 more than 1.5x the baseline.
+    Returns the write-up material: endpoint, numbers, the owner that moved, the worst trace, the hop to look at."""
+    if baseline is None:  # the steady-state window that preceded this one; the first window has nothing to regress from
+        rows = st.q("""MATCH (w:Window {id:$w}) MATCH (b:Window) WHERE b.created < w.created AND NOT b.label STARTS WITH 'pause-'
+                       RETURN b.id ORDER BY b.created DESC LIMIT 1""", {"w": window})
+        if not rows:
+            return None
+        baseline = rows[0][0]
+    base = baseline
+    if base == window:
+        return None
+    hb = {h["op"]: h for h in root_health(st, base)}
+    hw = {h["op"]: h for h in root_health(st, window, baseline_p50={op: h["p50_ms"] for op, h in hb.items()})}
+    for op, w in hw.items():
+        b = hb.get(op)
+        if not b:
+            continue
+        worse_fail = w["fail_rate"] > b["fail_rate"] + 0.05
+        worse_p95 = w["p95_ms"] > 1.5 * b["p95_ms"]
+        if not (worse_fail or worse_p95):
+            continue
+        owners_w = critical_owners(st, window, op, include_hangs=True)
+        owners_b = {label(o): o["per_request_ms"] for o in critical_owners(st, base, op)}
+        moved = sorted(owners_w, key=lambda o: -(o["per_request_ms"] - owners_b.get(label(o), 0.0)))
+        top = moved[0] if moved else None
+        _, worst = st.ro("MATCH (t:Trace {window:$w, root:$op}) RETURN t.id, t.duration_ms, t.status ORDER BY t.duration_ms DESC LIMIT 1", {"w": window, "op": op})
+        _, wlabel = st.ro("MATCH (x:Window {id:$w}) RETURN x.label", {"w": window})
+        return {"window": window, "label": wlabel[0][0] if wlabel else "", "baseline": base, "endpoint": op, "service": w["service"],
+                "fail_rate": (b["fail_rate"], w["fail_rate"]), "p50_ms": (b["p50_ms"], w["p50_ms"]), "p95_ms": (b["p95_ms"], w["p95_ms"]),
+                "traces": w["traces"], "kind": "failures" if worse_fail else "latency",
+                "owner": {**top, "baseline_per_request_ms": owners_b.get(label(top), 0.0)} if top else None,
+                "hop": f"{top['service']} -> {top['peer']}" if top and top.get("peer") else (top["service"] if top else ""),
+                "worst_trace": {"id": worst[0][0], "duration_ms": round(worst[0][1], 1), "status": worst[0][2]} if worst else None}
+    return None
+
+
+def incidents(st: Store) -> list[dict]:
+    """Every window that reads as an incident against the current steady state, newest first."""
+    from . import ingest
+    out = []
+    for w in reversed(ingest.windows(st)):
+        inc = incident(st, w["id"])
+        if inc:
+            out.append(inc)
+    return out
+
+
 def findings(st: Store, window: str) -> list[dict]:
     out: list[dict] = []
     for o in critical_owners(st, window)[:3]:
         if o["share_pct"] >= 15:
+            c = o.get("code")
             out.append({"kind": "critical_owner", "severity": "high" if o["share_pct"] >= 30 else "medium", "service": o["service"],
                         "detail": f"{label(o)} owns {o['share_pct']}% of steady-state end-to-end latency on the critical path "
-                                  f"({o['per_request_ms']:.0f} ms per request, {o['spans']} critical spans)"})
+                                  f"({o['per_request_ms']:.0f} ms per request, {o['spans']} critical spans)"
+                                  + (f"; code: {c.get('location') or c.get('file')}" + (f" {c['function']}" if c.get('function') else "") if c else ""),
+                        "code": c})
     for f in fan_out(st, window):
         out.append({"kind": "fan_out", "severity": "medium", "service": f["from"],
                     "detail": f"{f['from']} -> {f['to']}: {f['calls_per_request']} calls per request "

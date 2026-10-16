@@ -24,6 +24,16 @@ def _tags(span: dict) -> dict:
     return {t["key"]: t["value"] for t in span.get("tags", [])}
 
 
+def _code(tags: dict) -> str:
+    """OpenTelemetry code attributes, new names first, then the pre-1.26 names. Empty when the instrumentation emits none."""
+    fn = tags.get("code.function.name") or tags.get("code.function") or ""
+    path = tags.get("code.file.path") or tags.get("code.filepath") or ""
+    line = tags.get("code.line.number") or tags.get("code.lineno") or ""
+    if not (fn or path):
+        return ""
+    return f"{path}{':' + str(line) if line else ''}{' ' + fn if fn else ''}".strip()
+
+
 def normalise(trace: dict) -> dict:
     """One trace -> {id, spans:[{id, parent, service, op, start_us, duration_us, kind, error, status, attrs}]}."""
     procs = {k: v["serviceName"] for k, v in trace["processes"].items()}
@@ -38,5 +48,6 @@ def normalise(trace: dict) -> dict:
             "error": bool(error), "status": tags.get("http.response.status_code") or tags.get("rpc.response.status_code"),
             "attrs": {k: tags[k] for k in ("http.route", "http.request.method", "rpc.method", "db.system.name",
                                             "db.operation.name", "server.address", "server.port") if k in tags},
+            "code": _code(tags),
         })
     return {"id": trace["traceID"], "spans": spans}

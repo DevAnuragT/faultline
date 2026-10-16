@@ -100,6 +100,30 @@ def propose_guardrail(hop: str, rationale: str = "") -> dict:
 
 
 @mcp.tool()
+def incidents() -> list[dict]:
+    """Windows that regressed against steady state, with the owner that moved, hop, code pointer and worst trace."""
+    return box().incidents()
+
+
+@mcp.tool()
+def code_pointer(service: str, op: str) -> dict:
+    """Where in the source an operation lives (span code attributes, else the demo source map)."""
+    return box().code_pointer(service, op)
+
+
+@mcp.tool()
+def propose_incident_issue(window: str, rationale: str = "") -> dict:
+    """Propose an incident issue for a regressed window; a human approves before anything is filed."""
+    return box().propose_incident_issue(window, rationale)
+
+
+@mcp.tool()
+def propose_pr(subject: str, rationale: str = "") -> dict:
+    """Propose a draft PR for a VERIFIED fix, an approved guardrail or an experiment's incident report; a human approves."""
+    return box().propose_pr(subject, rationale)
+
+
+@mcp.tool()
 def query_graph(cypher: str) -> dict:
     """Read-only Cypher against the graph (max 25 rows)."""
     return box().query_graph(cypher)

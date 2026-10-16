@@ -58,7 +58,7 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h2>Who owns the latency</h2><span class="hint">CRISP critical path, bottom-up, hangs excluded</span></div>
-          <table class="owners" id="owners"><thead><tr><th></th><th>Owner</th><th class="num">share</th><th class="num">ms / request</th></tr></thead><tbody></tbody></table>
+          <table class="owners" id="owners"><thead><tr><th></th><th>Owner</th><th class="num">share</th><th class="num">ms / request</th><th>Code</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <div class="panel">
@@ -106,6 +106,10 @@
         </div>
       </div>
       <div class="panel">
+        <div class="panel-head"><h2>Incidents</h2><span class="hint">windows that regressed against steady state; each can become an issue with the evidence</span></div>
+        <div id="incidents" class="ledger"></div>
+      </div>
+      <div class="panel">
         <div class="panel-head"><h2>Experiments</h2><span class="hint">the graph's prediction against what happened</span></div>
         <div id="experiments-list" class="ledger"></div>
       </div>
@@ -124,6 +128,7 @@
             <button type="button" data-q="What is slow and why?">What is slow and why?</button>
             <button type="button" data-q="What should we fix first? Use propose_fix to propose it.">What should we fix first?</button>
             <button type="button" data-q="What would you break next to test resilience, and what did the last experiment teach us?">What would you break next?</button>
+            <button type="button" data-q="What went wrong in the last incident, where in the code is it, and should we file it?">What went wrong?</button>
             <button type="button" data-q="Which data stores can be reached from the edge, and over what?">What is exposed?</button>
           </div>
           <div class="row"><input id="q" type="text" placeholder="Ask about this window" autocomplete="off"><button type="submit" class="btn primary">Ask</button><button type="button" class="btn" id="clear-chat">Clear</button></div>
