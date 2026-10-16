@@ -295,7 +295,8 @@ FINDING_CYPHER = {
 UNWIND ts AS t WITH t WHERE t.duration_ms <= 10 * med
 WITH collect(t) AS ts, sum(t.duration_ms) AS total UNWIND ts AS t
 MATCH (s:Span {critical:true})-[:OF]->(t)
-RETURN s.service, s.op, s.peer, round(1000.0*sum(s.self_us)/1000/total)/10 AS share_pct ORDER BY share_pct DESC""",
+WITH s.service AS service, s.op AS op, s.peer AS peer, sum(s.self_us) AS self_us, total
+RETURN service, op, peer, toInteger(1000.0*self_us/1000.0/total)/10.0 AS share_pct ORDER BY share_pct DESC""",
     "fan_out": "MATCH (a:Service)-[c:CALLS {window:$w}]->(b:Service) WHERE c.per_trace >= 3 RETURN a.name, b.name, c.per_trace, c.errors, c.p95_ms ORDER BY c.per_trace DESC",
     "hang_not_fail": """MATCH (t:Trace {window:$w}) WITH t.root AS root, percentileDisc(t.duration_ms, 0.5) AS med, collect(t) AS ts
 UNWIND ts AS t WITH root, med, t WHERE t.duration_ms > 10 * med
