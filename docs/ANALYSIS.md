@@ -163,7 +163,7 @@ Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing
 → Redis fan-out), which is the demo's through-line.
 
-## 8. Plan
+## 8. Plan (status Oct 16, late evening: steps 1 and 2 done, step 3 next)
 
 1. **Core (Oct 16):** compose (Jaeger + 4 HotROD containers + FalkorDB), load generator, Jaeger ingest into windows,
    CRISP critical path, findings (critical owners, SPOF by betweenness, fan-out, hang-not-fail), blast-radius prediction, CLI, tests.
