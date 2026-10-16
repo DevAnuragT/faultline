@@ -252,8 +252,66 @@ const EXAMPLES = (w) => ({
   "Silent retries": `MATCH (c1:Span {window:'${w}', error:true})-[:CHILD_OF]->(p)<-[:CHILD_OF]-(c2:Span)\nWHERE c1.op = c2.op AND c2.start_us > c1.start_us\nRETURN c1.service, c1.op, count(DISTINCT c1) AS retried`,
   "Approvals bound to evidence": `MATCH (a:Action) OPTIONAL MATCH (a)-[:EXECUTED_AS]->(x)\nRETURN a.id, a.type, a.status, left(a.hash, 12) AS evidence, x.id, coalesce(x.verdict, '') AS verdict ORDER BY a.ts DESC`,
 });
+const SCHEMA = {
+  nodes: [
+    { id: "Finding", x: 0.17, y: 0.10, sub: "kind, severity, detail" },
+    { id: "Service", x: 0.17, y: 0.38, sub: "name", loop: "left" }, { id: "Operation", x: 0.44, y: 0.38, sub: "key, name, service", loop: "right" },
+    { id: "Span", x: 0.44, y: 0.66, sub: "critical, self_us, peer, proto, code", loop: "left" }, { id: "Trace", x: 0.44, y: 0.90, sub: "id, root, duration_ms, status" },
+    { id: "Window", x: 0.68, y: 0.86, sub: "id, label, traces" },
+    { id: "Experiment", x: 0.68, y: 0.16, sub: "hypothesis, verdict, lesson" }, { id: "Fix", x: 0.92, y: 0.62, sub: "flags, verdict, gates" },
+    { id: "Action", x: 0.92, y: 0.16, sub: "type, payload, hash, status" },
+  ],
+  edges: [
+    ["Service", "Service", "CALLS {window}"], ["Service", "Operation", "EXPOSES"], ["Operation", "Operation", "INVOKES {window}"],
+    ["Span", "Operation", "ON"], ["Span", "Span", "CHILD_OF"], ["Span", "Trace", "OF"], ["Trace", "Window", "IN"],
+    ["Finding", "Service", "ABOUT"], ["Experiment", "Service", "TARGETS", 0.78], ["Experiment", "Operation", "PREDICTED / ACTUAL_IMPACT"],
+    ["Experiment", "Window", "BASELINE / OBSERVED"], ["Fix", "Service", "TARGETS", 0.28], ["Fix", "Window", "BEFORE / AFTER"],
+    ["Action", "Experiment", "EXECUTED_AS"], ["Action", "Fix", "EXECUTED_AS"],
+  ],
+};
+function drawSchema(counts) {
+  const svg = d3.select("#schema"); svg.selectAll("*").remove();
+  const W = svg.node().clientWidth || 700, H = 520; svg.attr("viewBox", `0 0 ${W} ${H}`);
+  const pos = {}; SCHEMA.nodes.forEach((n) => (pos[n.id] = { x: n.x * W, y: n.y * H }));
+  const ember = css("--ember"), line2 = css("--line-2"), panel = css("--panel");
+  svg.append("defs").append("marker").attr("id", "sarrow").attr("viewBox", "0 -4 8 8").attr("refX", 8).attr("markerWidth", 8).attr("markerHeight", 8).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
+    .append("path").attr("d", "M0,-4L8,0L0,4").attr("fill", line2);
+  const g = svg.append("g");
+  for (const [a, b, rel, at = 0.5] of SCHEMA.edges) {
+    const A = pos[a], B = pos[b];
+    if (a === b) {
+      const side = SCHEMA.nodes.find((n) => n.id === a).loop || "left";
+      let d, lx, ly, anchor = "middle";
+      if (side === "left") { d = `M${A.x - 40},${A.y - 10} C${A.x - 100},${A.y - 42} ${A.x - 100},${A.y + 26} ${A.x - 40},${A.y + 10}`; lx = A.x - 72; ly = A.y + 40; }
+      else if (side === "top") { d = `M${A.x - 14},${A.y - 18} C${A.x - 50},${A.y - 70} ${A.x + 50},${A.y - 70} ${A.x + 14},${A.y - 18}`; lx = A.x; ly = A.y - 62; }
+      else { d = `M${A.x + 40},${A.y - 10} C${A.x + 100},${A.y - 42} ${A.x + 100},${A.y + 26} ${A.x + 40},${A.y + 10}`; lx = A.x + 72; ly = A.y + 40; }
+      g.append("path").attr("d", d).attr("fill", "none").attr("stroke", line2).attr("stroke-width", 1.2).attr("marker-end", "url(#sarrow)");
+      g.append("text").attr("class", "rel").attr("x", lx).attr("y", ly).attr("text-anchor", anchor).text(rel);
+      continue;
+    }
+    const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
+    const x1 = A.x + ux * 48, y1 = A.y + uy * 18, x2 = B.x - ux * 52, y2 = B.y - uy * 20;
+    g.append("line").attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2).attr("stroke", line2).attr("stroke-width", 1.2).attr("marker-end", "url(#sarrow)");
+    const mx = x1 + (x2 - x1) * at, my = y1 + (y2 - y1) * at;
+    const t = g.append("text").attr("class", "rel").attr("x", mx).attr("y", my - 5).attr("text-anchor", "middle").text(rel);
+    const bb = t.node().getBBox();
+    g.insert("rect", () => t.node()).attr("x", bb.x - 3).attr("y", bb.y - 1).attr("width", bb.width + 6).attr("height", bb.height + 2).attr("fill", panel);
+  }
+  const node = svg.append("g").selectAll("g").data(SCHEMA.nodes).join("g").attr("transform", (d) => `translate(${pos[d.id].x},${pos[d.id].y})`);
+  node.append("rect").attr("x", -48).attr("y", -18).attr("width", 96).attr("height", 36).attr("rx", 4).attr("fill", panel)
+    .attr("stroke", (d) => ["Span", "Experiment", "Fix", "Action"].includes(d.id) ? ember : line2).attr("stroke-width", 1.5);
+  node.append("text").attr("text-anchor", "middle").attr("dy", "-2").text((d) => `:${d.id}`);
+  node.append("text").attr("class", "sub").attr("text-anchor", "middle").attr("dy", "11").text((d) => counts[d.id] != null ? `${counts[d.id].toLocaleString()} nodes` : "");
+  node.append("title").text((d) => `${d.id} {${d.sub}}`);
+}
 async function loadGraphView() {
   const m = await api("/api/model"); $("#model").textContent = m.text;
+  try {
+    const c = await post("/api/query", { cypher: "MATCH (n) UNWIND labels(n) AS label RETURN label, count(*)" });
+    const counts = {}; (c.rows || []).forEach(([l, n]) => (counts[l] = n));
+    drawSchema(counts);
+    $("#model-counts").textContent = Object.entries(counts).map(([l, n]) => `${n.toLocaleString()} ${l}`).join(" · ");
+  } catch (e) { drawSchema({}); }
   const ex = EXAMPLES(state.window); const sel = $("#examples");
   sel.innerHTML = Object.keys(ex).map((k) => `<option>${esc(k)}</option>`).join("");
   $("#cypher").value = ex[sel.value];

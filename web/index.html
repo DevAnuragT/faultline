@@ -146,8 +146,9 @@
     <section class="view" id="view-graph" hidden>
       <div class="two">
         <div class="panel">
-          <div class="panel-head"><h2>Graph model</h2></div>
-          <pre id="model" class="model"></pre>
+          <div class="panel-head"><h2>Graph model</h2><span class="hint" id="model-counts"></span></div>
+          <svg id="schema" role="img" aria-label="Graph schema: node labels and relationship types"></svg>
+          <details><summary class="hint">Properties</summary><pre id="model" class="model"></pre></details>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>Cypher</h2><span class="hint">read-only, 25 rows</span></div>
