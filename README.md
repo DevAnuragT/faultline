@@ -4,9 +4,23 @@
 
 Track: **1. Agents That Act on Connected Data** · Hackathon: Graph Hacks (WeMakeDevs × FalkorDB)
 
+**Demo video:** _coming before submission_ · **Live site:** _coming before submission_ (read-only; the "Plan & verify" button runs live in a private scratch graph) · **Blog:** [docs/BLOG.md](docs/BLOG.md)
+
+## See it in 30 seconds
+
+Your scanner lists 33 advisories for a six-package Flask app. The graph proves 11 are reachable from a public endpoint and stores each witness path:
+
 ![Every exposed path, stored in FalkorDB](docs/img/exposure-map.png)
 
 *Each red diamond is an advisory; each path is a stored witness from a public endpoint into the dependency's real source. Solid grey = exact calls, dashed amber = low-confidence links.*
+
+The agent's naive fix is "bump urllib3 to 2.6.3". The graph rejects it (a constraint on a `DEPENDS_ON` edge), the agent re-plans a co-upgrade, rebuilds the candidate versions into a second graph and re-triages there. Only a `VERIFIED` result can become a draft PR:
+
+![The graph rejected the naive plan; the fix is verified in a scratch graph](docs/img/graph-checked-fix.png)
+
+Every tool the agent chooses is shown before its answer, and verdicts come from the graph, never from the model:
+
+![The agent and the tools it chose](docs/img/agent-tab.png)
 
 ## What it does
 
@@ -32,7 +46,8 @@ The naive plan says "bump urllib3 to 2.6.3". The graph rejects it: `requests 2.2
 
 * **The verdict is a path query** over a code graph joined to dependency and advisory nodes. The product has no other way to decide.
 * **Trust is part of the schema.** `CALLS` / `MAYBE_CALLS` / `REFERENCES` are different relationship types, so one engine answers both "provably" and "plausibly".
-* **Evidence and authorization live in the graph.** Findings keep their witness path; approvals bind to a snapshot of the graph; a rebuilt scratch graph is how a fix is checked. Change the graph and old approvals expire.
+* **Evidence and authorization live in the graph, across sessions.** Findings keep their witness path; approvals bind to a snapshot of the graph. Change the graph and old approvals expire.
+* **A fix is checked in a second graph.** The candidate dependency set is built into a private scratch graph in the same FalkorDB instance (multi-graph), the same verdict queries run there, and the two are compared through gates. The public site does this live for every visitor and deletes the scratch graph afterwards.
 * **Version constraints are graph edges**, so the planner can reason about co-upgrades.
 * Remove FalkorDB and there are no verdicts, no evidence, no scratch-graph verification and no action authorization; the app fails closed.
 
@@ -51,7 +66,7 @@ agent.py      Gemini tool-calling agent        mcp_server.py   same tools over M
 streamlit_app.py  UI      guard.py  read-only public mode enforced in the backend
 ```
 
-Gemini does two jobs: picking the vulnerable function from a fix-commit diff plus a deterministic candidate list (structured output, cached), and running the tool-calling agent. It never decides reachability, and it cannot execute actions. Free-tier quotas are small, so calls walk a fallback chain of models; without a key an offline mode answers from the same tools.
+Gemini does two jobs: picking the vulnerable function from a fix-commit diff plus a deterministic candidate list (structured output, cached), and running the tool-calling agent. It never decides reachability, and it cannot execute actions. The Agent tab opens on a recorded conversation (`data/frozen/agent.json`) so the tools it chose are visible before you ask anything. Free-tier quotas are small, so calls walk a fallback chain of models; without a key an offline mode answers from the same tools.
 
 ## Graph data model
 
@@ -108,21 +123,23 @@ body, forged payload, edited diff, changed target repo, and re-approval idempote
 docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest        # or: docker compose up --build
 make setup                                                              # venv + dependencies (Python 3.11+)
 cp .env.example .env     # GEMINI_API_KEY (optional); leave FALKORDB_USERNAME/PASSWORD empty for local
-make seed                # builds the graph, runs the closed loop, records the what-if
+make seed                # builds the graph, runs the closed loop, records the what-if and the agent conversation
 make run                 # Streamlit UI
 make demo                # clean ingest in a throwaway graph; prints every number used above
 make test                # the full test suite (needs the local FalkorDB)
 ```
 
-CLI: `python -m reachable.cli ingest | plan | remediate | propose-pr | approve <id> | whatif <variant> | ask "<question>"`.
+CLI: `python -m reachable.cli ingest | plan | remediate | propose-pr | approve <id> | whatif <variant> | ask "<question>" | record-agent`.
 FalkorDB Browser: http://localhost:3000 (e.g. `MATCH p=(:Endpoint)-[:HANDLED_BY]->()-[:CALLS*1..9]->(:Function {name:'parse_url'}) RETURN p`).
 
 **Real GitHub PR:** set `GITHUB_REPO=owner/repo` (needs `gh auth login`); on approval the code creates a branch, commits the new
 pins and opens a **draft** PR whose body is the gate report. Without it, the diff and report are written to `out/`.
 
 **Public deployment** (read-only, enforced in `reachable/guard.py`): set `REACHABLE_PUBLIC=true`. Rebuilds, what-if edits,
-verification, proposals and execution all refuse; reads and the agent's explanations work; the recorded closed loop and
-what-if are shown with their snapshot ids. Seed the cloud graph first with `make seed` against it.
+proposals and execution all refuse; reads and the agent work. **"Plan & verify a fix now" still runs live** for visitors: in a
+private scratch graph, one visitor at a time with a 30 s cooldown, nothing written to the shared graph (`tests/test_public.py`
+checks the shared graph is unchanged afterwards). The recorded closed loop, what-if and agent conversation are shown with their
+snapshot ids. Seed the cloud graph first with `make seed` against it. Hosting options and the connection probe: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## MCP
 

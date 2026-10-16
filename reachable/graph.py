@@ -7,9 +7,11 @@ from . import config
 
 
 class Store:
-    def __init__(self, graph: str | None = None) -> None:
+    def __init__(self, graph: str | None = None, ephemeral: bool = False) -> None:
+        self.ephemeral = ephemeral  # a private scratch graph: writable even in read-only public mode
         self.db = FalkorDB(host=config.FALKORDB_HOST, port=config.FALKORDB_PORT, username=config.FALKORDB_USERNAME,
-                           password=config.FALKORDB_PASSWORD, ssl=config.FALKORDB_SSL)
+                           password=config.FALKORDB_PASSWORD, ssl=config.FALKORDB_SSL,
+                           socket_connect_timeout=config.CONNECT_TIMEOUT)  # fail fast instead of hanging the page
         self.name = graph or config.GRAPH_NAME
         self.g = self.db.select_graph(self.name)
 

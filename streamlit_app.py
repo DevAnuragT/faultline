@@ -83,6 +83,20 @@ def render_fix_tab(s: Store, public: bool) -> None:
     st.caption("The agent plans a compatible upgrade, rebuilds the graph with the candidate versions in a private scratch "
                "graph, re-triages, and only a VERIFIED result can become a pull request. Say 'graph-checked', not 'secure'.")
     rem = verify.latest_remediation(s)
+    live = st.session_state.get("live_rem")
+    if public:
+        c1, c2 = st.columns(2)
+        if c1.button("Plan & verify a fix now (live, in a private scratch graph)", width="stretch"):
+            try:
+                with st.status("Planning and verifying in a scratch graph (about 15 seconds)...", expanded=True) as status:
+                    st.session_state.live_rem = verify.run_closed_loop_ephemeral(s, progress=status.write)
+                st.rerun()
+            except verify.BusyError as exc:
+                st.warning(f"Not right now: {exc}. The operator's recorded run is shown below.")
+        c2.button("Propose draft PR", width="stretch", disabled=True,
+                  help="Disabled on the public site: proposals and approvals write to the graph.")
+        if live:
+            rem = live
     if not public:
         c1, c2 = st.columns(2)
         if c1.button("Plan & verify a fix (builds a scratch graph)", width="stretch"):
@@ -100,7 +114,11 @@ def render_fix_tab(s: Store, public: bool) -> None:
         return
     kind, label = STATUS_STYLE[rem["status"]]
     getattr(st, kind)(f"{label}  ·  remediation `{rem['id']}`")
-    if public:
+    if public and rem is live:
+        st.caption(f"**Live result** from your click: planned from the shared graph, verified in a private scratch graph that "
+                   f"was then deleted (baseline snapshot `{rem['baseline_snapshot']}` → candidate `{rem['candidate_snapshot']}`). "
+                   "Nothing was written to the shared graph.")
+    elif public:
         st.caption(f"Read-only demo: showing the operator's recorded run (baseline snapshot `{rem['baseline_snapshot']}` → "
                    f"candidate `{rem['candidate_snapshot']}`, recorded {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(rem['ts']))}).")
     for r in rem["plan"]["rejected"]:
@@ -127,6 +145,28 @@ def verdict_table(findings: list[dict]) -> pd.DataFrame:
                           "Fix": f["fixed_version"] or ""} for f in findings])
 
 
+def network_probe(host: str, port: int) -> str:
+    """DNS, then a raw TCP connect: tells apart 'host blocks the port' from 'bad credentials' without leaking secrets."""
+    import socket
+    import time as _t
+
+    lines = []
+    try:
+        ips = sorted({a[4][0] for a in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)})
+        lines.append(f"DNS: {host} -> {', '.join(ips)}")
+    except Exception as exc:
+        return f"DNS: FAILED ({exc.__class__.__name__}: {exc}). The host name is wrong or this host has no DNS."
+    t = _t.time()
+    try:
+        with socket.create_connection((host, port), timeout=8):
+            lines.append(f"TCP connect to port {port}: OK in {_t.time() - t:.2f}s -> the port is open; check username/password/ssl")
+    except Exception as exc:
+        lines.append(f"TCP connect to port {port}: FAILED after {_t.time() - t:.1f}s ({exc.__class__.__name__}: {exc})")
+        lines.append("-> this host cannot reach the database port. Outbound traffic is blocked here, or the FalkorDB Cloud "
+                     "instance is not READY / restricts source IPs. Credentials were not even tried.")
+    return "\n".join(lines)
+
+
 def main() -> None:
     try:
         s = store()
@@ -139,12 +179,18 @@ def main() -> None:
                    + (f"  |  secrets parse error: {config.SECRETS_INFO['error']}" if config.SECRETS_INFO["error"] else ""))
         st.info("Running locally: `docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest`.  "
                 "On Streamlit Cloud: check App settings > Secrets (FALKORDB_HOST / PORT / USERNAME / PASSWORD / SSL).")
+        with st.expander("Network probe from this host", expanded=True):
+            st.code(network_probe(config.FALKORDB_HOST, config.FALKORDB_PORT), language="text")
         store.clear()
         return
     ensure_graph(s)
     if "agent" not in st.session_state:
         st.session_state.agent = Agent(s)
         st.session_state.chat = []
+        st.session_state.recorded = frozen.load_agent()
+        if st.session_state.recorded:  # show the agent working before the visitor types anything
+            for t in st.session_state.recorded["turns"]:
+                st.session_state.chat += [("user", t["prompt"], None), ("assistant", t["reply"], t["trace"])]
 
     findings = analysis.latest_findings(s)
     run_id = findings[0]["run"]
@@ -190,8 +236,8 @@ def main() -> None:
         st.success("Verdicts changed by the code change: " + "; ".join(
             f"**{k}** {a} → **{b}**" for k, (a, b) in st.session_state.diff.items()))
 
-    tab_triage, tab_fix, tab_agent, tab_actions, tab_cypher = st.tabs(
-        ["Triage & proof", "Graph-checked fix", "Agent", "Actions (human approval)", "Graph & Cypher"])
+    tab_triage, tab_agent, tab_fix, tab_actions, tab_cypher = st.tabs(
+        ["Triage & proof", "Agent", "Graph-checked fix", "Actions (human approval)", "Graph & Cypher"])
 
     with tab_triage:
         left, right = st.columns([5, 6])
@@ -235,14 +281,24 @@ def main() -> None:
         render_fix_tab(s, PUBLIC)
 
     with tab_agent:
-        st.caption("Gemini calls graph tools (explain_finding, recommend_fixes, query_graph, ...). It can propose actions; you approve them.")
+        st.caption("Gemini decides which graph tools to call (explain_finding, recommend_fixes, verify_remediation, query_graph, ...). "
+                   "Verdicts come from the graph, never from the model. It can propose actions; you approve them.")
+        rec = st.session_state.get("recorded")
+        if rec and st.session_state.chat and st.session_state.chat[0][1] == rec["turns"][0]["prompt"]:
+            c1, c2 = st.columns([6, 1])
+            c1.info(f"Recorded conversation with `{rec['model']}` on graph snapshot `{rec['snapshot']}`, every tool call shown. "
+                    "Ask your own question below.")
+            if c2.button("Clear", width="stretch"):
+                st.session_state.chat = []
+                st.rerun()
         for role, text, trace in st.session_state.chat:
             with st.chat_message(role):
-                st.markdown(text)
                 if trace:
-                    with st.expander(f"Tool calls ({len(trace)})"):
+                    with st.expander(f"Tool calls the agent chose ({len(trace)})", expanded=True):
                         for t in trace:
-                            st.code(f"{t['tool']}({t['args']})", language="python")
+                            args = ", ".join(f"{k}={v!r}" for k, v in t["args"].items())
+                            st.markdown(f"`{t['tool']}({args})` → {t.get('summary', '')}")
+                st.markdown(text)
         examples = ["Summarize the risk: what is actually reachable?", "Why is GHSA-q2q7-5pp4-w6pg reachable? Show the path.",
                     "What should we fix first? Plan it, check it, and propose the PR.", "Propose issues for everything reachable."]
         picked = None
@@ -251,8 +307,10 @@ def main() -> None:
                 picked = ex
         prompt = st.chat_input("Ask about your vulnerabilities...") or picked
         if prompt:
-            reply, trace = st.session_state.agent.ask(prompt)
-            st.session_state.chat += [("user", prompt, None), ("assistant", reply, trace)]
+            with st.spinner("Agent is calling graph tools..."):
+                reply, trace = st.session_state.agent.ask(prompt)
+            compact = [{"tool": t["tool"], "args": t["args"], "summary": frozen._compact(t["result"])} for t in trace]
+            st.session_state.chat += [("user", prompt, None), ("assistant", reply, compact)]
             st.rerun()
 
     with tab_actions:

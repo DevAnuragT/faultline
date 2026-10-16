@@ -1,0 +1,24 @@
+# One-click fallback host: Render > New > Blueprint > this repo. Uses the Dockerfile; free plan.
+# Set the secret values in the Render dashboard (sync: false = prompt on first deploy).
+services:
+  - type: web
+    name: reachable
+    runtime: docker
+    plan: free
+    envVars:
+      - key: REACHABLE_PUBLIC
+        value: "true"
+      - key: GEMINI_MODEL
+        value: "gemini-3.5-flash"
+      - key: FALKORDB_SSL
+        value: "false"
+      - key: FALKORDB_HOST
+        sync: false
+      - key: FALKORDB_PORT
+        sync: false
+      - key: FALKORDB_USERNAME
+        sync: false
+      - key: FALKORDB_PASSWORD
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

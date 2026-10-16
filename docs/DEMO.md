@@ -10,7 +10,8 @@ its dependencies into FalkorDB and asks the graph." Triage tab: click GHSA-q2q7-
 `GET /preview` through `requests` into `urllib3.parse_url`, 8 hops, all exact calls. "11 are exposed."
 
 **0:30–1:15, the agent catches its own mistake**
-Agent tab: "What should we fix first?" The naive plan bumps urllib3 to 2.6.3. The graph rejects it: `requests 2.25.1
+Agent tab (opens on the recorded conversation; press Clear, then the third example button so the tool calls appear live):
+"What should we fix first?" The naive plan bumps urllib3 to 2.6.3. The graph rejects it: `requests 2.25.1
 requires urllib3<1.27`, a constraint stored on a graph edge. It re-plans a co-upgrade.
 
 **1:15–1:55, graph-checked fix**
@@ -27,4 +28,4 @@ Graph & Cypher tab: the `shortestPath` query behind every verdict. "Without Falk
 evidence and no way to verify the fix."
 
 Reset between takes: `make seed` (rebuilds, re-records the what-if). The public read-only site (`REACHABLE_PUBLIC=true`)
-shows the recorded run and cannot be changed by visitors.
+shows the recorded run; visitors can press "Plan & verify a fix now" (live, scratch graph) but cannot change the shared graph.

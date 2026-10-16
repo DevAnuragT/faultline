@@ -45,6 +45,14 @@ edges and symbol mappings, so any change in evidence expires pending approvals; 
 does not.
 
 ## Read-only public mode (`reachable/guard.py`)
-`REACHABLE_PUBLIC=true` makes every mutating backend function raise `ReadOnlyError` (ingest, what-if, triage,
-verification, proposals, execution). The UI hides the controls, but the backend is what enforces it
-(`tests/test_public.py`). The public site shows the recorded closed loop and what-if.
+`REACHABLE_PUBLIC=true` makes every mutating backend function raise `ReadOnlyError` on the shared graph (ingest,
+what-if, triage, persisted verification, proposals, execution). The UI hides the controls, but the backend is what
+enforces it (`tests/test_public.py`). A `Store(ephemeral=True)` (the private scratch graph) is exempt, which is what
+lets `verify.run_closed_loop_ephemeral` run the closed loop live for visitors: nothing is persisted, the scratch graph
+is deleted, one run at a time (`threading.Lock`) with a 30 s cooldown, `BusyError` instead of queueing. The public site
+shows the recorded closed loop, what-if and agent conversation (`reachable/frozen.py`).
+
+## Recorded agent conversation (`reachable/frozen.py`)
+`record_agent` runs the three example prompts through the live agent, each in a fresh chat so every turn shows the
+tools chosen for that question, and refuses a turn without a tool call. The Agent tab preloads it; the UI test checks
+the preload and that an example button sends exactly one request.

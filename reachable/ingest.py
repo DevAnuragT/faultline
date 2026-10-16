@@ -209,7 +209,7 @@ def load_advisories(st: Store, vulns: list[Vuln], pins: dict[str, str], cg: call
 
 def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict[str, str] | None = None) -> dict:
     """Build every graph layer. `pins` overrides requirements.txt (used to build a candidate-fix scratch graph)."""
-    guard.require_writable("Rebuilding the graph")
+    guard.require_writable("Rebuilding the graph", st)
     app_dir = prepare_app_dir(variant)
     pins = pins or parse_requirements(DEMO_APP / "requirements.txt")
     direct = [l.strip() for l in (DEMO_APP / "requirements.in").read_text().split() if l.strip()]

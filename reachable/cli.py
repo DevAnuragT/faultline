@@ -1,6 +1,6 @@
 """Command line:
   python -m reachable.cli ingest | triage | whatif <variant> | ask "<question>"
-  python -m reachable.cli plan | remediate | propose-pr | approve <action> | freeze | seed
+  python -m reachable.cli plan | remediate | propose-pr | approve <action> | freeze | record-agent | seed
 """
 from __future__ import annotations
 
@@ -47,6 +47,9 @@ def main(argv: list[str]) -> int:
     elif cmd == "freeze":
         r = frozen.record_whatif(st)
         print(f"what-if recorded: {len(r['flips'])} verdict flips, exposed {r['exposed_before']} -> {r['exposed_after']}")
+    elif cmd == "record-agent":
+        r = frozen.record_agent(st)
+        print(f"agent conversation recorded: {len(r['turns'])} turns with {r['model']}; snapshot {r['snapshot']}")
     elif cmd == "seed":
         print(ingest.full_ingest(st))
         analysis.triage(st)
@@ -54,6 +57,11 @@ def main(argv: list[str]) -> int:
         print("remediation:", res["status"], res["before"], "->", res["after"])
         r = frozen.record_whatif(st)
         print(f"what-if recorded: {len(r['flips'])} flips; snapshot {r['baseline_snapshot']}")
+        try:
+            a = frozen.record_agent(st)
+            print(f"agent conversation recorded: {len(a['turns'])} turns with {a['model']}")
+        except Exception as exc:  # no key / quota: the recorded conversation from the repo stays in place
+            print(f"agent conversation not re-recorded ({exc.__class__.__name__}); keeping the existing recording")
     elif cmd == "approve":
         print(actions.execute(st, argv[1]))
     else:

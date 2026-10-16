@@ -57,6 +57,32 @@ def test_reads_still_work_in_public_mode(st, public):
 
 def test_agent_tools_return_clean_errors_in_public_mode(st, public):
     box = Toolbox(st)
-    for res in (box.propose_issue("GHSA-q2q7-5pp4-w6pg"), box.propose_vex(), box.propose_fix_pr(), box.verify_remediation()):
+    for res in (box.propose_issue("GHSA-q2q7-5pp4-w6pg"), box.propose_vex(), box.propose_fix_pr()):
         assert res["ok"] is False and "read-only public demo" in res["error"]
     assert not st.q("MATCH (a:Action) RETURN a")  # nothing was written
+
+
+def _graph_fingerprint(st):
+    return (st.q("MATCH (n) RETURN count(n)")[0][0], st.q("MATCH ()-[r]->() RETURN count(r)")[0][0],
+            st.q("MATCH (m:Remediation) RETURN count(m)")[0][0], st.q("MATCH (r:Run) RETURN count(r)")[0][0])
+
+
+def test_public_visitors_can_verify_live_without_writing_anything(st, public, monkeypatch):
+    """The closed loop runs for real in a private scratch graph, but the shared graph is untouched afterwards."""
+    monkeypatch.setattr(verify, "_public_last_finished", 0.0)
+    monkeypatch.setattr(config, "PUBLIC_MODE", False)
+    verify.run_closed_loop(st, progress=lambda *_: None)  # the operator's recorded run (what `make seed` leaves behind)
+    monkeypatch.setattr(config, "PUBLIC_MODE", True)
+    before = _graph_fingerprint(st)
+    graphs_before = set(st.db.list_graphs())
+    res = verify.run_closed_loop_ephemeral(st, progress=lambda *_: None)
+    assert res["status"] == "VERIFIED" and res["persisted"] is False and res["cleared"]
+    assert _graph_fingerprint(st) == before
+    assert set(st.db.list_graphs()) == graphs_before  # the scratch graph was deleted
+    # one at a time, with a cooldown: a second visitor right away is told to wait instead of queueing work
+    with pytest.raises(verify.BusyError):
+        verify.run_closed_loop_ephemeral(st, progress=lambda *_: None)
+    # the agent tool reports the live result, or the recorded one while the cooldown lasts, never an error
+    out = Toolbox(st).verify_remediation()
+    assert out.get("ok", True) and out["status"] in ("VERIFIED", "REJECTED", "UNVERIFIED") and out["note"]
+    assert _graph_fingerprint(st) == before

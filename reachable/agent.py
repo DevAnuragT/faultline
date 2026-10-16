@@ -21,7 +21,8 @@ Rules:
   the gates, and report the status, exposure before/after and each gate. Only if the status is VERIFIED call
   propose_fix_pr. Never call a fix 'verified secure'; say 'graph-checked'. If the status is UNVERIFIED or REJECTED,
   explain why and do not propose a PR.
-- You may PROPOSE actions (propose_fix_pr, propose_issue, propose_vex). A human approves them; say so and give the action id.
+- You may PROPOSE actions (propose_fix_pr, propose_issue, propose_vex). Nothing is created, opened or filed until a
+  human approves the proposal in the Actions tab: say "proposed" (never "created" or "opened") and give the action id.
 - Be concise: short paragraphs or bullets, no filler."""
 
 FORBIDDEN = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|CALL\s+db\.|LOAD\s+CSV)\b", re.I)
@@ -113,10 +114,21 @@ class Toolbox:
         constraints consistent, exposure decreases, no new exposure). Status: VERIFIED, REJECTED or UNVERIFIED
         (UNVERIFIED means analysis coverage dropped, so no success may be claimed). Takes several seconds."""
         def run():
-            r = verify.run_closed_loop(self.st, progress=lambda m: None)
+            note = ""
+            if config.PUBLIC_MODE:
+                try:  # live, in a private scratch graph; nothing is written to the shared graph
+                    r = verify.run_closed_loop_ephemeral(self.st, progress=lambda m: None)
+                    note = "live run in a private scratch graph (public demo: result not persisted)"
+                except verify.BusyError as exc:
+                    r = verify.latest_remediation(self.st)
+                    if not r:
+                        raise guard.ReadOnlyError(str(exc))
+                    note = f"recorded run shown ({exc})"
+            else:
+                r = verify.run_closed_loop(self.st, progress=lambda m: None)
             return {"id": r["id"], "status": r["status"], "gates": r["gates"], "before": r["before"], "after": r["after"],
                     "cleared": r["cleared"], "new_exposed": r["new_exposed"], "changes": r["plan"]["changes"],
-                    "rejected_on_their_own": r["plan"]["rejected"]}
+                    "rejected_on_their_own": r["plan"]["rejected"], **({"note": note} if note else {})}
         return self._guarded("verify_remediation", {}, run)
 
     def propose_fix_pr(self) -> dict:

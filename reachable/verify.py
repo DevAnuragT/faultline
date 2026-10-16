@@ -12,6 +12,7 @@ from __future__ import annotations
 import difflib
 import json
 import re
+import threading
 import time
 import uuid
 
@@ -20,6 +21,17 @@ from .graph import Store
 
 EXPOSED = {"REACHABLE", "POSSIBLY_REACHABLE"}
 MIN_COVERAGE_RATIO = 0.5  # a candidate release analysed with <50% of the baseline's functions is not comparable
+
+# Public (read-only) mode may still run the closed loop *ephemerally*: the scratch graph is private and deleted, and
+# nothing is written to the shared graph. One verification at a time, with a cooldown, so visitors cannot pile up
+# scratch graphs on the shared FalkorDB instance.
+PUBLIC_COOLDOWN_SECONDS = 30
+_public_lock = threading.Lock()
+_public_last_finished = 0.0
+
+
+class BusyError(RuntimeError):
+    """Another visitor's verification is running, or the cooldown has not elapsed."""
 
 
 def coverage(st: Store) -> dict[str, int]:
@@ -50,14 +62,18 @@ def requirements_diff(pins_after: dict[str, str]) -> str:
     return "".join(difflib.unified_diff(old, new, "a/demo_app/requirements.txt", "b/demo_app/requirements.txt"))
 
 
-def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: bool = False) -> dict:
-    guard.require_writable("Remediation verification")
+def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: bool = False,
+                persist: bool = True) -> dict:
+    """Verify `plan` in a private scratch graph. With `persist=False` the result is returned but NOT written to the
+    shared graph (what the read-only public site uses); with `persist=True` a Remediation node is created."""
+    if persist:
+        guard.require_writable("Remediation verification")
     baseline_findings = analysis.latest_findings(st)
     base_run = baseline_findings[0]["run"]
     before = summarize(baseline_findings)
     before_cov = coverage(st)
 
-    scratch = Store(f"{config.GRAPH_NAME}_scratch_{uuid.uuid4().hex[:8]}")
+    scratch = Store(f"{config.GRAPH_NAME}_scratch_{uuid.uuid4().hex[:8]}", ephemeral=True)
     try:
         progress("building candidate dependency set into a scratch graph")
         ingest.full_ingest(scratch, progress=lambda m: progress(f"  scratch: {m}"), pins=plan.pins_after)
@@ -103,8 +119,10 @@ def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: boo
         "remaining_exposed": after["exposed"], "coverage": cov, "plan": plan.as_dict(),
         "baseline_run": base_run, "baseline_snapshot": analysis.run_snapshot(st, base_run),
         "candidate_snapshot": candidate_snapshot, "requirements_diff": requirements_diff(plan.pins_after),
-        "ts": int(time.time()),
+        "ts": int(time.time()), "persisted": persist,
     }
+    if not persist:
+        return result
     st.q("MATCH (r:Run {id:$run}) CREATE (m:Remediation {id:$id, status:$status, result:$result, ts:$ts, "
          "baseline_snapshot:$snap})-[:BASED_ON]->(r)",
          {"run": base_run, "id": result["id"], "status": status, "result": json.dumps(result), "ts": result["ts"],
@@ -112,10 +130,28 @@ def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: boo
     return result
 
 
-def run_closed_loop(st: Store, progress=print) -> dict:
+def run_closed_loop(st: Store, progress=print, persist: bool = True) -> dict:
     progress("planning version-aware upgrades from the graph")
     plan = planner.plan_remediation(st)
-    return verify_plan(st, plan, progress)
+    return verify_plan(st, plan, progress, persist=persist)
+
+
+def run_closed_loop_ephemeral(st: Store, progress=print) -> dict:
+    """The closed loop for the read-only public site: live, in a private scratch graph that is deleted afterwards,
+    nothing written to the shared graph, one at a time, with a cooldown. Raises BusyError instead of queueing."""
+    global _public_last_finished
+    if not _public_lock.acquire(blocking=False):
+        raise BusyError("another visitor's verification is running right now; try again in a moment")
+    try:
+        wait = PUBLIC_COOLDOWN_SECONDS - (time.time() - _public_last_finished)
+        if wait > 0:
+            raise BusyError(f"a verification just finished; try again in {int(wait) + 1}s")
+        try:
+            return run_closed_loop(st, progress, persist=False)
+        finally:
+            _public_last_finished = time.time()
+    finally:
+        _public_lock.release()
 
 
 def latest_remediation(st: Store) -> dict | None:

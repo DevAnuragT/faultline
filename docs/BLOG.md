@@ -24,6 +24,8 @@ WITH v, f, h, shortestPath((h)-[:CALLS|MAYBE_CALLS|REFERENCES*1..14]->(f)) AS p 
 Of the 33 advisories, 11 are exposed. The witness path (for example `GET /preview → … → requests → … →
 urllib3.parse_url`, 8 exact hops) is stored on the finding as proof.
 
+![Every exposed path, stored in FalkorDB](img/exposure-map.png)
+
 ## The agent that rejected its own plan
 
 The naive fix is "bump every exposed package to its fixed version". For urllib3 that means 2.6.3, which is impossible:
@@ -36,6 +38,12 @@ decreases, no new exposure. Here: 11 exposed → 0, coverage retained (urllib3 4
 upgraded packages had been analysed less than before, the status would be `UNVERIFIED`, never "fixed". Only a `VERIFIED`
 result can become a draft PR.
 
+![The graph rejected the naive plan; the fix is verified in a scratch graph](img/graph-checked-fix.png)
+
+The scratch graph is a second graph in the same FalkorDB instance. On the public site any visitor can press "Plan &
+verify" and watch this happen live; the scratch graph is private and deleted afterwards, and nothing is written to the
+shared graph.
+
 ## Authorization that expires
 
 Every proposed action stores a canonical payload (target, content hashes, a hash of the graph snapshot, the witness path)
@@ -46,8 +54,10 @@ is not just a database here; it is what an approval means.
 ## Gemini's job
 
 Gemini maps advisories to vulnerable functions (reading the fix-commit diff against a deterministic candidate list) and
-runs the tool-calling agent. It never decides reachability, and it cannot execute anything. The same tools are exposed
-over MCP, minus anything that executes.
+runs the tool-calling agent. It never decides reachability, and it cannot execute anything. Every tool it chooses is shown
+before its answer. The same tools are exposed over MCP, minus anything that executes.
+
+![The agent and the tools it chose](img/agent-tab.png)
 
 ## What I would not claim
 
