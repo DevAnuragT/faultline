@@ -4,6 +4,8 @@
 
 Track: **1. Agents That Act on Connected Data** · Hackathon: Graph Hacks (WeMakeDevs × FalkorDB)
 
+**[Live demo (read-only)](https://appapppy-jsqchvqvftzac9bqxkscmm.streamlit.app/)** · Video: _coming_ · Blog: _coming_ · [Project story](docs/PROJECT_STORY.md)
+
 **Demo video:** _coming before submission_ · **Live site:** _coming before submission_ (read-only; the "Plan & verify" button runs live in a private scratch graph) · **Blog:** [docs/BLOG.md](docs/BLOG.md)
 
 ## See it in 30 seconds
