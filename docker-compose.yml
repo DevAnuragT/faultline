@@ -1,0 +1,28 @@
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports: ["${FALKORDB_PORT:-6379}:6379", "${FALKORDB_UI_PORT:-3000}:3000"]
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports: ["16686:16686"]
+  frontend:
+    image: jaegertracing/example-hotrod:latest
+    command: ["frontend", "--customer-service-hostname=customer", "--driver-service-hostname=driver", "--route-service-hostname=route"]
+    environment: [OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318]
+    ports: ["8080:8080"]
+    depends_on: [jaeger]
+  customer:
+    image: jaegertracing/example-hotrod:latest
+    command: ["customer"]
+    environment: [OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318]
+    depends_on: [jaeger]
+  driver:
+    image: jaegertracing/example-hotrod:latest
+    command: ["driver"]
+    environment: [OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318]
+    depends_on: [jaeger]
+  route:
+    image: jaegertracing/example-hotrod:latest
+    command: ["route"]
+    environment: [OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318]
+    depends_on: [jaeger]
