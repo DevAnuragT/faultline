@@ -34,7 +34,7 @@ def rank_experiments(st: Store, window: str) -> list[dict]:
         criticality = 0.4 * (c["betweenness"] / max_b) + 0.3 * (c["inbound_calls"] / total_calls) + 0.3 * blast_share
         h = history.get(name)
         safety = 1.0
-        reasons = [f"blast radius {blast_share:.0%} of requests", f"betweenness {c['betweenness']:.0f}", f"{c['inbound_calls']:.0f} inbound calls"]
+        reasons = [f"Blast radius {blast_share:.0%} of requests", f"betweenness {c['betweenness']:.0f}", f"{c['inbound_calls']:.0f} inbound calls"]
         skip = None
         if h:
             age = time.time() - (h["ts"] or 0)
@@ -74,7 +74,7 @@ def remedies(st: Store, window: str) -> list[dict]:
         if o and o["share_pct"] >= 5:
             out.append({"kind": "contention", "service": c["service"], "op": c["op"], "share_pct": o["share_pct"], "per_request_ms": o["per_request_ms"],
                         "evidence": f"{c['op']} takes ~{c['alone_ms']:.0f} ms with nothing else in flight and ~{c['per_inflight_ms']:.0f} ms more per concurrent call, up to {c['crowded_ms']:.0f} ms with {c['inflight_high']} in flight ({c['ratio']}x, correlation {c['correlation']}, {c['spans']} spans)",
-                        "change": "stop serialising this work: remove the lock, or give it a pool"})
+                        "change": "Stop serialising this work: remove the lock, or give it a pool"})
     for f in analysis.serialized_fanout(st, window):
         svc, peer = f["hop"].split(" -> ")
         stake = sum(o["per_request_ms"] for o in owners.values() if o["service"] == peer)
@@ -82,13 +82,13 @@ def remedies(st: Store, window: str) -> list[dict]:
         if share >= 5:
             out.append({"kind": "serialized_fanout", "service": svc, "op": f["hop"], "share_pct": round(share, 1), "per_request_ms": round(stake, 1),
                         "evidence": f"{f['calls_per_request']:.0f} calls per request into {peer} run at most {f['max_concurrency']} at a time: {f['rounds']} rounds of ~{f['per_call_ms']:.0f} ms",
-                        "change": "raise the caller's concurrency for this hop, or batch the calls"})
+                        "change": "Raise the caller's concurrency for this hop, or batch the calls"})
     taken = {(r["service"], r["op"]) for r in out}
     for o in owners.values():
         if o["share_pct"] >= 15 and (o["service"], o["op"]) not in taken and not o.get("peer"):
             out.append({"kind": "per_call_cost", "service": o["service"], "op": o["op"], "share_pct": o["share_pct"], "per_request_ms": o["per_request_ms"],
                         "evidence": f"{analysis.label(o)} owns {o['share_pct']}% of latency at {o['per_request_ms']:.0f} ms per request and is not contended",
-                        "change": "make each call cheaper: an index, a cache, or a smaller query"})
+                        "change": "Make each call cheaper: an index, a cache, or a smaller query"})
     for r in out:
         owner_svc = OWNER_OF.get(r["service"], r["service"])
         act = ACTUATORS.get((r["kind"], r["service"])) or ACTUATORS.get((r["kind"], owner_svc))
@@ -158,7 +158,7 @@ def actions(st: Store, window: str) -> list[dict]:
     out = []
     nf = next_fix(st, window)
     if nf:
-        out.append({"type": "fix", "priority": 1, "title": f"{nf['kind'].replace('_', ' ')}: {nf['targets_owner']} ({nf['share_pct']}%)",
+        out.append({"type": "fix", "priority": 1, "title": f"{nf['kind'].replace('_', ' ').capitalize()}: {nf['targets_owner']} ({nf['share_pct']}%)",
                     "why": nf["evidence"], "payload": {"type": "fix", "flags": " ".join(nf["flags"]), "rationale": nf["evidence"]}})
     for g in guardrails(st, window):
         if g["priority"] == "high" and g["kind"] == "timeout":

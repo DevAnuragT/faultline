@@ -806,3 +806,20 @@ a.linkish { cursor: pointer; }
   .remedy-kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .remedy-kv dd + dt { margin-top: 8px; }
 }
+
+/* wiring pass: segmented filter, finding queries, SLO pill */
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--r-sm); overflow: hidden; flex: none; }
+.seg button { all: unset; cursor: pointer; padding: 4px 10px; font-size: 12.5px; color: var(--fg-2); }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button[aria-pressed="true"] { background: var(--raised); color: var(--fg); font-weight: 500; }
+.seg button:hover { color: var(--fg); }
+.seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.finding .text p { margin: 0; }
+.f-q { margin-top: 4px; font-size: 12.5px; }
+.q-toggle { color: var(--fg-3); font-size: 12px; }
+.q-toggle:hover { color: var(--fg); }
+.q-box { display: grid; gap: 8px; margin-top: 8px; }
+.q-box[hidden] { display: none; }
+.q-code { margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--sunken); font: 12px/1.6 var(--mono); color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow: auto; }
+.q-actions { display: flex; align-items: center; gap: 6px; }
+.st-pills { display: inline-flex; flex-direction: column; gap: 6px; align-items: flex-start; }

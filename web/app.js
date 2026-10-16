@@ -98,6 +98,14 @@ window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer
 
 /* ---------- boot ---------- */
 const windowOption = (x) => `<option value="${x.id}">${esc(x.label)} · ${x.id} · ${x.traces} traces</option>`;
+/* the picker groups windows by what they are: steady state, deliberate fault experiments, and fixes that were rolled back */
+const KIND_GROUP = { steady: "Steady state", experiment: "Fault experiments", rejected: "Rejected fixes, rolled back" };
+function windowOptions(ws) {
+  const newest = [...ws].reverse();
+  return Object.entries(KIND_GROUP).map(([k, lbl]) => { const xs = newest.filter((x) => (x.kind || "steady") === k); return xs.length ? `<optgroup label="${lbl}">${xs.map(windowOption).join("")}</optgroup>` : ""; }).join("")
+    + newest.filter((x) => x.kind && !KIND_GROUP[x.kind]).map(windowOption).join("");
+}
+const compareOption = (x) => `<option value="${x.id}">${esc(x.label)} · ${x.id}${x.kind && x.kind !== "steady" ? ` (${x.kind})` : ""}</option>`;
 async function boot() {
   state.meta = await api("/api/meta");
   $("#meta-graph").textContent = state.meta.graph;
@@ -109,13 +117,12 @@ async function boot() {
   if (r0.w && w.windows.some((x) => x.id === r0.w)) state.window = r0.w;
   if (r0.t) state.traceId = r0.t;
   const sel = $("#window");
-  sel.innerHTML = [...w.windows].reverse().map(windowOption).join("");
+  sel.innerHTML = windowOptions(w.windows);
   sel.value = state.window;
   sel.addEventListener("change", () => { state.window = sel.value; state.traceId = null; setCompareDefaults(); loadOverview(); const v = route().view; if (v !== "findings") show(v); else syncHash(v); });
-  for (const id of ["cmp-a", "cmp-b"]) $(`#${id}`).innerHTML = w.windows.map((x) => `<option value="${x.id}">${esc(x.label)} · ${x.id}</option>`).join("");
+  for (const id of ["cmp-a", "cmp-b"]) $(`#${id}`).innerHTML = w.windows.map(compareOption).join("");
   $("#cmp-a").value = w.windows[0]?.id; $("#cmp-b").value = w.windows[w.windows.length - 1]?.id;
   setCompareDefaults();
-  loadWindowRanges();
   $("#cmp-a").addEventListener("change", loadCompare); $("#cmp-b").addEventListener("change", loadCompare);
   state.recorded = await api("/api/agent/recorded");
   if (state.recorded.turns?.length) {
@@ -160,7 +167,7 @@ async function loadOverview() {
   const findings = [...o.findings].sort((a, b) => (SEV[a.severity] ?? 3) - (SEV[b.severity] ?? 3));
   const nHigh = findings.filter((f) => f.severity === "high").length;
   $("#findings-count").innerHTML = findings.length ? `<b>${findings.length}</b> findings${nHigh ? ` · <b>${nHigh}</b> high` : ""}` : "";
-  $("#findings-list").innerHTML = findings.map((f) => `<li class="finding ${esc(f.severity)}"><span class="sev"><i></i>${esc(f.severity[0].toUpperCase() + f.severity.slice(1))}</span><span class="kind tag">${esc(f.kind.replace(/_/g, " "))}</span><p class="text">${nice(f.detail)}</p></li>`).join("")
+  $("#findings-list").innerHTML = findings.map((f) => `<li class="finding ${esc(f.severity)}"><span class="sev"><i></i>${esc(f.severity[0].toUpperCase() + f.severity.slice(1))}</span><span class="kind tag">${esc(f.kind.replace(/_/g, " "))}</span><div class="text"><p>${nice(f.detail)}</p>${f.cypher ? queryBox(f.cypher, f.params) : ""}</div></li>`).join("")
     || `<li class="empty-li">${empty("No findings in this window", "Pick the steady-state window in the top bar, or ingest traces with <code>make baseline</code>.")}</li>`;
 
   $("#exposure tbody").innerHTML = o.exposure.map((e) => `<tr><td><b>${esc(e.store)}</b><span class="cell-sub">${esc(e.store_kind)}</span></td><td class="path">${nice(e.path)}</td><td><div class="tags">${e.protocols.map((p) => `<span class="tag">${esc(p || "?")}</span>`).join("")}</div></td><td class="num">${e.calls_per_request_into_store}</td></tr>`).join("")
@@ -285,17 +292,20 @@ function renderChain(chain) {
   $("#chain tbody").innerHTML = chain.map((s) => `<tr><td>${esc(s.service)}</td><td class="mono">${esc(s.op)}</td><td class="mono muted">${esc(s.peer) || `<span class="hint">—</span>`}</td><td class="num">${fmt(s.duration_ms, 1)}</td><td class="num">${s.self_ms >= 1 ? `<b>${fmt(s.self_ms, 1)}</b>` : fmt(s.self_ms, 1)}</td></tr>`).join("")
     || `<tr><td colspan="5">${empty("No critical spans", "This trace has no spans marked on the critical path.")}</td></tr>`;
 }
-/* the slowest requests come from a read-only Cypher query, like every other number here */
+/* the request list comes from /api/traces: slowest first, or only the requests with error spans */
 async function loadTraceList(w) {
+  const errors = state.traceFilter === "errors";
+  $$("[data-trace-filter]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.traceFilter === (errors ? "errors" : "slowest"))));
   let r;
-  try { r = await post("/api/query", { cypher: `MATCH (t:Trace {window:'${w.replace(/'/g, "")}'}) RETURN t.id, t.root, t.duration_ms, t.status, t.errors ORDER BY t.duration_ms DESC LIMIT 10` }); }
+  try { r = await api(`/api/traces?window=${encodeURIComponent(w)}&order=duration&errors=${errors}&limit=12`); }
   catch (e) { r = { error: e.message }; }
   if (state.window !== w) return;
   $("#trace-list tbody").innerHTML = r.error ? `<tr><td colspan="4">${empty("Could not list requests", esc(r.error), "alert")}</td></tr>`
-    : r.rows.map(([id, root, ms, status, errors]) => `<tr data-trace="${esc(id)}"><td><span class="mono">${esc(String(id).slice(0, 12))}…</span>${copyBtn(id, "trace id")}<span class="cell-sub">${esc(root)}${errors ? ` · ${errors} error span${errors === 1 ? "" : "s"}` : ""}</span></td><td class="num">${fmt(ms)}</td><td><span class="pill ${String(status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(status || "none")}</span></td><td class="act"><button class="btn small" type="button" data-trace-open="${esc(id)}">Open</button></td></tr>`).join("")
-    || `<tr><td colspan="4">${empty("No requests", "This window has no traces.")}</td></tr>`;
+    : r.traces.map((t) => `<tr data-trace="${esc(t.id)}"><td><span class="mono">${esc(String(t.id).slice(0, 12))}…</span>${copyBtn(t.id, "trace id")}<span class="cell-sub">${esc(t.root)}${t.start_us ? ` · ${clock(t.start_us)}` : ""}${t.errors ? ` · ${t.errors} error span${t.errors === 1 ? "" : "s"}` : ""}</span></td><td class="num">${fmt(t.duration_ms)}</td><td><span class="pill ${String(t.status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(t.status || "none")}</span></td><td class="act"><button class="btn small" type="button" data-trace-open="${esc(t.id)}">Open</button></td></tr>`).join("")
+    || `<tr><td colspan="4">${empty(errors ? "No request with errors" : "No requests", errors ? "Every request in this window ran without an error span." : "This window has no traces.", errors ? "check" : "info")}</td></tr>`;
   markShownTrace();
 }
+document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-trace-filter]"); if (b) { state.traceFilter = b.dataset.traceFilter; loadTraceList(state.window); } });
 function markShownTrace() { $$("#trace-list tr[data-trace]").forEach((tr) => { const on = tr.dataset.trace === state.shownTrace; tr.classList.toggle("current", on); const b = tr.querySelector("[data-trace-open]"); if (b) { b.disabled = on; b.textContent = on ? "Shown" : "Open"; } }); }
 function openTrace(id) {
   state.traceId = id || null;
@@ -447,7 +457,7 @@ async function pollActions() {
   try { const r = await api("/api/actions"); const pending = r.actions.filter((a) => a.status === "proposed").length; $("#pending-count").textContent = pending; $("#pending-count").hidden = !pending;
     const running = Object.values(r.jobs || {}).some((j) => j.status === "running");
     if (!$("#view-approvals").hidden) await loadActions();
-    if (running) setTimeout(pollActions, 2500); else if (Object.keys(state.jobs).length && !running) { state.jobs = r.jobs; const w = await api("/api/windows"); if (w.windows.length !== state.windows.length) { state.windows = w.windows; const sel = $("#window"); sel.innerHTML = [...w.windows].reverse().map(windowOption).join(""); sel.value = state.window; } }
+    if (running) setTimeout(pollActions, 2500); else if (Object.keys(state.jobs).length && !running) { state.jobs = r.jobs; const w = await api("/api/windows"); if (w.windows.length !== state.windows.length) { state.windows = w.windows; const sel = $("#window"); sel.innerHTML = windowOptions(w.windows); sel.value = state.window; for (const id of ["cmp-a", "cmp-b"]) { const c = $(`#${id}`), v = c.value; c.innerHTML = w.windows.map(compareOption).join(""); c.value = v; } } }
   } catch (e) {}
 }
 
@@ -550,6 +560,7 @@ async function loadGraphView() {
   sel.innerHTML = Object.keys(ex).map((k) => `<option>${esc(k)}</option>`).join("");
   if (prev && ex[prev]) sel.value = prev;
   $("#cypher").value = ex[sel.value];
+  if (state.pendingCypher) { $("#cypher").value = state.pendingCypher; state.pendingCypher = null; }
   sel.onchange = () => { $("#cypher").value = ex[sel.value]; runQuery(); };
   $("#run").onclick = runQuery;
   $("#cypher").onkeydown = (ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); runQuery(); } };
@@ -769,12 +780,10 @@ window.addEventListener("hashchange", () => { if (tour.open && route().view !== 
    ====================================================================== */
 const byCreated = () => [...state.windows].sort((a, b) => a.created - b.created);
 const winLabel = (id) => { const x = state.windows.find((w) => w.id === id); return x ? x.label : id; };
-const isExperiment = (id) => winLabel(id).startsWith("pause-");
-/* the baseline of a window is the steady-state window captured just before it, the same rule incident detection uses */
-function baselineOf(id) {
-  const ws = byCreated(), me = ws.find((x) => x.id === id);
-  return me ? ws.filter((x) => x.created < me.created && !x.label.startsWith("pause-")).pop() || null : null;
-}
+const winById = (id) => state.windows.find((w) => w.id === id) || null;
+const isExperiment = (id) => winById(id)?.kind === "experiment";
+/* each window names its own baseline: the steady-state window captured before it (from /api/windows) */
+const baselineOf = (id) => winById(winById(id)?.baseline);
 function setCompareDefaults() {
   const base = baselineOf(state.window);
   if (base) { $("#cmp-a").value = base.id; $("#cmp-b").value = state.window; }
@@ -788,112 +797,91 @@ function deltaChip(x, y, points = false, cls = "delta") {
   return `<span class="${cls} ${c}">${y / x >= 10 ? `×${fmt(y / x, 0)}` : `${r > 0 ? "+" : r < 0 ? "−" : "±"}${Math.round(Math.abs(r) * 100)}%`}</span>`;
 }
 const clock = (us) => us ? new Date(us / 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
-function span(id) {
-  const r = state.ranges?.[id]; if (!r) return "";
-  const secs = Math.max(1, Math.round((r[1] - r[0]) / 1e6));
-  return `${new Date(r[0] / 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${clock(r[0])} to ${clock(r[1])} (${secs < 120 ? `${secs} s` : `${Math.round(secs / 60)} min`})`;
+function spanOf(a, b) {
+  if (!a || !b) return "";
+  const secs = Math.max(1, Math.round((b - a) / 1e6));
+  return `${new Date(a / 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${clock(a)} to ${clock(b)} (${secs < 120 ? `${secs} s` : `${Math.round(secs / 60)} min`})`;
 }
-async function loadWindowRanges() {
-  try {
-    const r = await post("/api/query", { cypher: "MATCH (w:Window) RETURN w.id, w.start_us, w.end_us" });
-    state.ranges = Object.fromEntries((r.rows || []).map(([id, a, b]) => [id, [a, b]]));
-    if (state.status) renderStatus(state.status);
-  } catch (e) {}
-}
+const span = (id) => { const w = winById(id); return w ? spanOf(w.start_us, w.end_us) : ""; };
 
 /* ---------- status banner and KPI deltas ---------- */
+function pctChip(p, cls = "delta") {
+  if (p == null) return "";
+  const c = Math.abs(p) < 2 ? "flat" : p > 0 ? "up" : "down";
+  return `<span class="${cls} ${c}">${p >= 900 ? `×${fmt(1 + p / 100, 0)}` : `${p > 0 ? "+" : p < 0 ? "−" : "±"}${Math.round(Math.abs(p))}%`}</span>`;
+}
+function ptsChip(p, cls = "delta") {
+  if (p == null) return "";
+  const c = Math.abs(p) < 0.5 ? "flat" : p > 0 ? "up" : "down", a = Math.abs(p);
+  return `<span class="${cls} ${c}">${p > 0 ? "+" : p < 0 ? "−" : "±"}${fmt(a, a < 10 && a % 1 ? 1 : 0)} pts</span>`;
+}
+/* the banner and the KPI deltas come from /api/status, which uses the incident thresholds, so they never disagree with the incident list */
 async function loadStatus() {
-  const w = state.window, base = baselineOf(w), h = state.overview?.health[0];
-  if (!base || !h) {
-    state.status = { kind: base ? "unknown" : "baseline", w, base, h };
-    ["#d-p50", "#d-p95", "#d-fail"].forEach((id) => ($(id).innerHTML = ""));
-    renderStatus(state.status); return;
-  }
-  let d, inc;
-  try { [d, inc] = await Promise.all([api(`/api/compare?a=${encodeURIComponent(base.id)}&b=${encodeURIComponent(w)}`), api("/api/incidents")]); } catch (e) { return; }
+  const w = state.window, me = winById(w);
+  let s, d = null;
+  try {
+    [s, d] = await Promise.all([api(`/api/status?window=${encodeURIComponent(w)}`),
+      me?.baseline ? api(`/api/compare?a=${encodeURIComponent(me.baseline)}&b=${encodeURIComponent(w)}`).catch(() => null) : null]);
+  } catch (e) { return; }
   if (state.window !== w) return;
-  let c = d.health.find((x) => x.op === h.op) || d.health[0];
-  if (!c) { state.status = { kind: "unknown", w, base, h }; renderStatus(state.status); return; }
-  $("#d-p50").innerHTML = deltaChip(c.p50_ms[0], c.p50_ms[1], false, "kdelta-chip");
-  $("#d-p95").innerHTML = deltaChip(c.p95_ms[0], c.p95_ms[1], false, "kdelta-chip");
-  $("#d-fail").innerHTML = deltaChip(c.fail_rate[0], c.fail_rate[1], true, "kdelta-chip");
-  /* incident detection counts hung requests as failed; when it has flagged this window, the banner uses its numbers so the two never disagree */
-  const flagged = inc.incidents.find((x) => x.window === w && x.baseline === base.id && x.endpoint === c.op);
-  if (flagged) c = { op: c.op, p50_ms: flagged.p50_ms, p95_ms: flagged.p95_ms, fail_rate: flagged.fail_rate, hangs: true };
-  const failing = c.fail_rate[1] > c.fail_rate[0] + 0.05, degraded = c.p95_ms[1] > 1.5 * c.p95_ms[0];
-  const faster = c.p50_ms[1] < 0.8 * c.p50_ms[0];
-  state.status = { kind: failing ? "failing" : degraded ? "degraded" : "ok", faster, w, base, h, c, mover: d.owners[0] };
-  const vs = `against ${base.label} (${base.id})`;
-  $("#d-p50").title = `change ${vs}`; $("#d-p95").title = `change ${vs}`; $("#d-fail").title = `change ${vs}`;
+  state.status = { ...s, kind: s.status, w, mover: d?.owners?.[0] || null };
+  const dl = s.deltas, vs = s.baseline ? `against ${s.baseline_label} (${s.baseline})` : "";
+  $("#d-p50").innerHTML = dl ? pctChip(dl.p50_pct, "kdelta-chip") : ""; $("#d-p50").title = vs;
+  $("#d-p95").innerHTML = dl ? pctChip(dl.p95_pct, "kdelta-chip") : ""; $("#d-p95").title = vs;
+  $("#d-fail").innerHTML = dl ? ptsChip(dl.fail_rate_pts, "kdelta-chip") : ""; $("#d-fail").title = vs;
   renderStatus(state.status);
 }
-const STATUS_TEXT = { ok: ["ok", "Healthy"], degraded: ["wait", "Degraded"], failing: ["bad", "Failing"], baseline: ["muted", "Baseline"], unknown: ["muted", "No comparison"] };
+const STATUS_TEXT = { ok: ["ok", "Healthy"], degraded: ["wait", "Degraded"], failing: ["bad", "Failing"], baseline: ["muted", "Baseline"] };
 function statusSentence(st) {
-  const op = st.h?.op || "The endpoint", lbl = winLabel(st.w);
-  if (st.kind === "baseline") return `${esc(op)} in <b>${esc(lbl)}</b> is the first window. Later windows are compared against it.`;
-  if (st.kind === "unknown") return `${esc(op)} in <b>${esc(lbl)}</b> has nothing to compare against in <b>${esc(st.base?.label || "the baseline")}</b>.`;
-  const c = st.c, base = `<b>${esc(st.base.label)}</b>`;
-  if (st.kind === "failing") return `${esc(op)} in <b>${esc(lbl)}</b> is failing: ${pct(c.fail_rate[1])} of requests ${c.hangs ? "failed or hung" : "failed"}, against ${pct(c.fail_rate[0])} in ${base}.`;
-  if (st.kind === "degraded") return `${esc(op)} in <b>${esc(lbl)}</b> is slower than normal: p95 is ${fmt(c.p95_ms[1])} ms, against ${fmt(c.p95_ms[0])} ms in ${base}.`;
-  return `${esc(op)} in <b>${esc(lbl)}</b> is within its baseline ${base}${st.faster ? `, and faster: p50 ${fmt(c.p50_ms[0])} → ${fmt(c.p50_ms[1])} ms` : ""}.`;
+  const op = esc(st.endpoint || state.overview?.health[0]?.op || "This endpoint"), lbl = `<b>${esc(st.label || winLabel(st.w))}</b>`;
+  if (st.kind === "baseline") return `${op} in ${lbl} is the first window. Later windows are compared against it.`;
+  const why = (st.reasons || []).map((r) => nice(r).replace(new RegExp(`\\b${(st.baseline_label || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`), `<b>${esc(st.baseline_label)}</b>`)).join("; ");
+  return `${op} in ${lbl}${st.kind === "ok" ? "" : ` against <b>${esc(st.baseline_label)}</b>`}: ${why}.`;
+}
+function sloPill(slo) {
+  if (!slo || !state.meta.slo) return "";
+  const t = state.meta.slo, ok = slo.p95_ok && slo.fail_ok;
+  const detail = `SLO for ${t.endpoint || "the endpoint"}: p95 within ${fmt(t.p95_ms)} ms (${slo.p95_ok ? "met" : "breached"}), failures within ${pct(t.fail_rate)} (${slo.fail_ok ? "met" : "breached"})`;
+  return `<span class="pill ${ok ? "ok" : "bad"}" title="${esc(detail)}"><i></i>${ok ? "within SLO" : "breaching SLO"}</span>`;
 }
 function renderStatus(st) {
-  const [k, word] = STATUS_TEXT[st.kind];
-  const exp = isExperiment(st.w);
-  const facts = [];
-  if (st.c) facts.push(`<span class="sf"><span class="k">p50</span>${deltaChip(st.c.p50_ms[0], st.c.p50_ms[1])}</span><span class="sf"><span class="k">p95</span>${deltaChip(st.c.p95_ms[0], st.c.p95_ms[1])}</span><span class="sf"><span class="k">${st.c.hangs ? "failed or hung" : "failed"}</span>${deltaChip(st.c.fail_rate[0], st.c.fail_rate[1], true)}</span>`);
+  const [k, word] = STATUS_TEXT[st.kind] || ["muted", st.kind];
+  const exp = isExperiment(st.w), dl = st.deltas, facts = [];
+  if (dl) facts.push(`<span class="sf"><span class="k">p50</span>${pctChip(dl.p50_pct)}</span><span class="sf"><span class="k">p95</span>${pctChip(dl.p95_pct)}</span><span class="sf"><span class="k">failed</span>${ptsChip(dl.fail_rate_pts)}</span>`);
   if (st.mover && st.mover.per_request_ms[0] !== st.mover.per_request_ms[1]) facts.push(`<span class="sf mover"><span class="k">biggest mover</span>${nice(st.mover.owner)} <span class="mono">${fmt(st.mover.per_request_ms[0])} → ${fmt(st.mover.per_request_ms[1])} ms</span></span>`);
   $("#status").className = `statusbar is-${st.kind}`;
-  $("#status").innerHTML = `<span class="pill ${k} st-pill"><i></i>${word}</span>
-    <div class="st-main"><p class="st-line">${statusSentence(st)}${exp ? ` <span class="tag">fault experiment</span>` : ""}</p>
+  $("#status").innerHTML = `<span class="st-pills"><span class="pill ${k} st-pill"><i></i>${word}</span>${sloPill(st.slo)}</span>
+    <div class="st-main"><p class="st-line">${statusSentence(st)}${exp ? ` <span class="tag">fault experiment</span>` : winById(st.w)?.kind === "rejected" ? ` <span class="tag">rejected fix</span>` : ""}</p>
       <div class="st-facts">${facts.join("")}<span class="sf idm"><span class="k">window</span><span class="mono">${esc(st.w)}</span>${copyBtn(st.w, "window id")}</span>${span(st.w) ? `<span class="sf"><span class="k">traces</span>${esc(span(st.w))}</span>` : ""}</div></div>
-    <div class="st-actions">${st.base ? `<a class="btn small" href="#experiments" data-compare-baseline>Compare with ${esc(st.base.label)}</a>` : ""}</div>`;
+    <div class="st-actions">${st.baseline ? `<a class="btn small" href="#experiments" data-compare-baseline>Compare with ${esc(st.baseline_label)}</a>` : ""}</div>`;
 }
 document.addEventListener("click", (e) => { if (e.target.closest?.("[data-compare-baseline]")) { e.preventDefault(); setCompareDefaults(); go("experiments"); setTimeout(() => $("#compare").closest(".panel").scrollIntoView({ block: "start" }), 300); } });
 
-/* ---------- next steps on Findings ---------- */
+/* ---------- next steps on Findings: the planner's ranked actions ---------- */
+const ACTION = {
+  issue: ["incident", "bad", "Propose incident issue"], fix: ["fix", "wait", "Propose fix"], guardrail: ["guardrail", "wait", "Propose guardrail"],
+  experiment: ["experiment", "muted", "Propose pause"], advice: ["advice", "muted", ""],
+};
+const subjectOf = (pl) => !pl ? null : pl.type === "guardrail" ? pl.hop : pl.type === "issue" ? pl.window : pl.type === "experiment" ? pl.target : pl.type === "fix" ? [].concat(pl.flags).join(" ") : pl.subject;
 async function loadNextSteps() {
   const w = state.window;
-  let p, inc, acts;
-  try { [p, inc, acts] = await Promise.all([api(`/api/planner?window=${encodeURIComponent(w)}`), api("/api/incidents"), api("/api/actions")]); }
-  catch (e) { $("#next-steps").innerHTML = `<li class="empty-li">${empty("Could not work out next steps", esc(e.message), "alert")}</li>`; return; }
+  let p, acts;
+  try { [p, acts] = await Promise.all([api(`/api/planner?window=${encodeURIComponent(w)}`), api("/api/actions")]); }
+  catch (e) { $("#next-steps").innerHTML = `<li class="empty-li">${empty("Could not load next steps", esc(e.message), "alert")}</li>`; return; }
   if (state.window !== w) return;
-  state.planner = p; state.incidents = inc.incidents; state.actions = acts.actions;
-  const steps = [];
-  const i = inc.incidents.find((x) => x.window === w);
-  if (i) steps.push({ type: "issue", subject: w, tone: "bad", title: `File an incident for ${i.endpoint}`,
-    why: `${pct(i.fail_rate[0])} → ${pct(i.fail_rate[1])} failed and p95 ${fmt(i.p95_ms[0])} → ${fmt(i.p95_ms[1])} ms against ${winLabel(i.baseline)}.${i.hop ? ` Look at ${i.hop}.` : ""}`,
-    body: { type: "issue", window: w }, verb: "Propose incident issue",
-    extra: i.worst_trace ? `<a class="linkish" href="#trace?w=${encodeURIComponent(w)}&t=${encodeURIComponent(i.worst_trace.id)}">Open the worst request</a>` : "" });
-  const nf = p.next_fix;
-  if (nf?.flags) steps.push({ type: "fix", subject: nf.flags.join(" "), tone: "wait", title: `Fix ${nf.targets_owner} with ${nf.flags.join(" ")} on ${nf.service}`,
-    why: nf.evidence ? `${sentence(nf.evidence)}. ${cap(nf.change)}.` : `${nf.why} It owns ${nf.share_pct}% of critical-path time (${fmt(nf.per_request_ms)} ms per request).`,
-    body: { type: "fix", flags: nf.flags.join(" "), rationale: `targets ${nf.targets_owner} (${nf.share_pct}%)` }, verb: "Propose fix" });
-  const top = (p.remedies || [])[0];
-  if (top && !top.actuator && !(nf && nf.targets_owner === `${top.service} ${top.op}`))
-    steps.push({ type: "remedy", tone: "muted", title: `${REMEDY[top.kind] ? cap(REMEDY[top.kind]) : "Remedy"} in ${/->/.test(top.op) ? top.op : `${top.service} ${top.op}`}`,
-      why: `${sentence(top.evidence)}. ${cap(top.change)}. There is no actuator for it in this environment, so it is a code change.`, verb: "" });
-  const g = state.overview.guardrails.find((x) => x.priority === "high" && x.kind === "timeout");
-  if (g) steps.push({ type: "guardrail", subject: g.hop, tone: "wait", title: `Add a ${g.value} timeout on ${g.hop}`, why: g.evidence, body: { type: "guardrail", hop: g.hop }, verb: "Propose guardrail" });
-  const x = p.experiments.find((r) => !r.skip && r.target !== "frontend" && !r.history && r.priority > 0);
-  if (x) steps.push({ type: "experiment", subject: x.target, tone: "muted", title: `Test what happens when ${x.target} stops`,
-    why: `Nothing has tested it yet. ${cap(x.reasons.join(", "))}.`, body: { type: "experiment", target: x.target }, verb: "Propose pause" });
-  steps.splice(4);
-  if (!steps.length && state.overview.owners[0]) {
-    const o = state.overview.owners[0];
-    steps.push({ type: "ask", tone: "muted", title: `Ask the agent how to speed up ${label(o)}`, why: `It owns ${o.share_pct}% of critical-path time and no known knob targets it.`, verb: "" });
-  }
-  const pending = (s) => state.actions.find((a) => a.status === "proposed" && a.type === s.type && a.subject === s.subject);
+  state.planner = p; state.actions = acts.actions;
+  const steps = [...(p.actions || [])].sort((a, b) => (a.priority ?? 9) - (b.priority ?? 9)).slice(0, 5);
+  const pending = (pl) => { const sub = subjectOf(pl); return sub != null && state.actions.find((a) => a.status === "proposed" && a.type === pl.type && a.subject === sub); };
   $("#next-count").innerHTML = steps.length ? `<b>${steps.length}</b> step${steps.length === 1 ? "" : "s"}` : "";
   $("#next-steps").innerHTML = steps.map((st) => {
-    const pend = st.subject && pending(st);
-    const act = pend ? `<span class="pill wait"><i></i>awaiting approval</span><a class="btn small" href="#approvals">Review in Approvals</a>`
-      : st.type === "ask" ? `<a class="btn small" href="#agent">Open the agent</a>`
-      : st.type === "remedy" ? `<a class="btn small" href="#experiments">See all remedies</a>`
-      : `<button class="btn small${st.type === "issue" ? " primary" : ""}" type="button" data-next="${esc(JSON.stringify(st.body))}" ${lock()}>${esc(st.verb)}</button>`;
-    return `<li class="step tone-${st.tone}"><span class="step-kind">${esc({ issue: "incident", fix: "fix", guardrail: "guardrail", experiment: "experiment", ask: "question", remedy: "remedy" }[st.type])}</span>
-      <div class="step-main"><b>${nice(st.title)}</b><p>${nice(st.why)}</p>${st.extra ? `<p class="step-extra">${st.extra}</p>` : ""}</div><div class="step-act">${act}</div></li>`;
-  }).join("") || `<li class="empty-li">${empty("Nothing to do", "The graph has no action to propose for this window.", "check")}</li>`;
+    const [kind, tone, verb] = ACTION[st.type] || [st.type, "muted", "Propose"];
+    const act = !st.payload ? `<span class="no-act" title="No actuator in this environment: the change is made in code"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>code change</span><a class="btn small" href="#experiments">See remedies</a>`
+      : pending(st.payload) ? `<span class="pill wait"><i></i>awaiting approval</span><a class="btn small" href="#approvals">Review in Approvals</a>`
+      : `<button class="btn small${st.type === "issue" ? " primary" : ""}" type="button" data-next="${esc(JSON.stringify(st.payload))}" ${lock()}>${esc(verb || "Propose")}</button>`;
+    const extra = st.type === "issue" && st.payload?.window && st.payload.window !== w ? `<p class="step-extra"><a class="linkish" href="#findings?w=${encodeURIComponent(st.payload.window)}">Open that window</a></p>` : "";
+    return `<li class="step tone-${tone}"><span class="step-kind">${esc(kind)}</span>
+      <div class="step-main"><b>${nice(cap(st.title))}</b><p>${nice(st.why || "")}</p>${extra}</div><div class="step-act">${act}</div></li>`;
+  }).join("") || `<li class="empty-li">${empty("Nothing to do", "The planner has no action to propose for this window.", "check")}</li>`;
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest?.("[data-next]"); if (!b || b.disabled) return;
@@ -906,18 +894,18 @@ document.addEventListener("click", async (e) => {
 /* ---------- incidents as runbook entries ---------- */
 function incidentCard(i) {
   const failing = i.kind === "failures";
-  const g = state.overview?.guardrails.find((x) => x.hop === i.hop && x.kind === "timeout");
+  const sg = i.suggested;
   const trace = i.worst_trace ? `<span class="idm"><span class="mono">${esc(i.worst_trace.id.slice(0, 16))}…</span>${copyBtn(i.worst_trace.id, "trace id")}</span> ${fmt(i.worst_trace.duration_ms)} ms · status ${esc(i.worst_trace.status || "none")} · <a class="linkish" href="#trace?w=${encodeURIComponent(i.window)}&t=${encodeURIComponent(i.worst_trace.id)}">Open waterfall</a>` : "";
   return `<article class="card runbook"><div class="card-head"><span class="pill ${failing ? "bad" : "wait"}"><i></i>${failing ? "failing" : "degraded"}</span><h5 class="card-title">${esc(i.endpoint)} <span class="muted">in</span> <span class="mono">${esc(i.label)}</span></h5><span class="span idm">${esc(i.window)}${copyBtn(i.window, "window id")}</span><span class="when">${i.traces} traces</span></div>
     <dl class="kv">
       <dt>Impact</dt><dd>${failing ? `<b>${pct(i.fail_rate[1])}</b> of requests failed <span class="from">(${pct(i.fail_rate[0])} before)</span>; ` : ""}p95 <span class="from">${fmt(i.p95_ms[0])} →</span> <b>${fmt(i.p95_ms[1])}</b> ms; p50 <span class="from">${fmt(i.p50_ms[0])} →</span> <b>${fmt(i.p50_ms[1])}</b> ms</dd>
-      <dt>When</dt><dd>${esc(span(i.window) || "not recorded")} <span class="from">· baseline ${esc(winLabel(i.baseline))} (${esc(i.baseline)})</span></dd>
+      <dt>When</dt><dd>${esc(spanOf(i.started_us, i.ended_us) || span(i.window) || "not recorded")} <span class="from">· baseline ${esc(i.baseline_label || winLabel(i.baseline))} (${esc(i.baseline)})</span></dd>
       ${i.owner ? `<dt>What moved</dt><dd>${esc(label(i.owner))}: ${fmt(i.owner.baseline_per_request_ms)} → <b>${fmt(i.owner.per_request_ms)}</b> ms per request ${i.owner.code ? `· ${codeLink(i.owner.code)}` : ""}</dd>` : ""}
       ${i.hop ? `<dt>Where to look</dt><dd class="mono">${nice(i.hop)}</dd>` : ""}
       ${trace ? `<dt>Worst request</dt><dd>${trace}</dd>` : ""}
-      <dt>Next step</dt><dd>${g ? `Add the ${esc(g.value)} timeout on ${nice(g.hop)} so the hop fails fast. ` : ""}File the incident with this evidence.</dd>
+      <dt>Next step</dt><dd>${sg ? `<b>${nice(cap(sg.title))}</b>. ${nice(cap(sg.why || ""))}.` : "File the incident with this evidence."}</dd>
     </dl>
-    <div class="card-foot"><span class="hint">Both become proposals that wait in Approvals.</span>${g ? `<button class="btn small" type="button" data-next="${esc(JSON.stringify({ type: "guardrail", hop: g.hop }))}" ${lock()}>Propose ${esc(g.value)} timeout</button>` : ""}<button class="btn small" data-propose-issue="${i.window}" ${lock()}>Propose incident issue</button></div></article>`;
+    <div class="card-foot"><span class="hint">Each becomes a proposal that waits in Approvals.</span>${sg?.payload && sg.type !== "issue" ? `<button class="btn small" type="button" data-next="${esc(JSON.stringify(sg.payload))}" ${lock()}>${esc((ACTION[sg.type] || [])[2] || "Propose")}</button>` : ""}<button class="btn small" data-propose-issue="${i.window}" ${lock()}>Propose incident issue</button></div></article>`;
 }
 
 /* ---------- copyable ids ---------- */
@@ -1007,17 +995,18 @@ document.addEventListener("keydown", (e) => {
 const mdEsc = (x) => String(x ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
 const plain = (x) => String(x ?? "").replace(/ -> /g, " → ");
 function mdReport() {
-  const o = state.overview, h = o.health[0] || {}, st = state.status || {}, base = st.base;
+  const o = state.overview, h = o.health[0] || {}, st = state.status || {}, base = winById(st.baseline), bh = base?.health, dl = st.deltas;
   const L = [`# ${h.op || "Endpoint"} in ${winLabel(state.window)} (${state.window})`, "",
-    `Status: **${(STATUS_TEXT[st.kind] || ["", "unknown"])[1]}**${base ? ` against ${base.label} (${base.id})` : ""}. Link: ${location.href}`, ""];
+    `Status: **${(STATUS_TEXT[st.kind] || ["", st.kind || "unknown"])[1]}**${base ? ` against ${base.label} (${base.id})` : ""}${(st.reasons || []).length ? `: ${plain(st.reasons.join("; "))}` : ""}. Link: ${location.href}`, ""];
   if (span(state.window)) L.push(`Traces: ${span(state.window)}, ${h.traces} requests.`, "");
-  L.push("| Measure | This window |" + (st.c ? ` ${base.label} | Change |` : ""), "|---|---:|" + (st.c ? "---:|---:|" : ""));
   const strip = (x) => x.replace(/<[^>]+>/g, "");
-  const c = st.c;
-  const rows = [["p50", `${fmt(c ? c.p50_ms[1] : h.p50_ms)} ms`, c && `${fmt(c.p50_ms[0])} ms`, c && strip(deltaChip(c.p50_ms[0], c.p50_ms[1]))],
-    ["p95", `${fmt(c ? c.p95_ms[1] : h.p95_ms)} ms`, c && `${fmt(c.p95_ms[0])} ms`, c && strip(deltaChip(c.p95_ms[0], c.p95_ms[1]))],
-    [c?.hangs ? "Failed or hung" : "Failed", c?.hangs ? pct(c.fail_rate[1]) : `${pct(h.fail_rate)} (${h.failed} of ${h.traces})`, c && pct(c.fail_rate[0]), c && strip(deltaChip(c.fail_rate[0], c.fail_rate[1], true))]];
-  rows.forEach((r) => L.push(`| ${r[0]} | ${r[1]} |` + (st.c ? ` ${r[2]} | ${r[3]} |` : "")));
+  const cmp = !!(bh && dl);
+  L.push("| Measure | This window |" + (cmp ? ` ${base.label} | Change |` : ""), "|---|---:|" + (cmp ? "---:|---:|" : ""));
+  const failNow = cmp ? bh.fail_rate + dl.fail_rate_pts / 100 : h.fail_rate, hung = cmp && Math.abs(failNow - h.fail_rate) > 0.01;
+  const rows = [["p50", `${fmt(h.p50_ms)} ms`, cmp && `${fmt(bh.p50_ms)} ms`, cmp && strip(pctChip(dl.p50_pct))],
+    ["p95", `${fmt(h.p95_ms)} ms`, cmp && `${fmt(bh.p95_ms)} ms`, cmp && strip(pctChip(dl.p95_pct))],
+    [hung ? "Failed or hung" : "Failed", hung ? pct(failNow) : `${pct(h.fail_rate)} (${h.failed} of ${h.traces})`, cmp && pct(bh.fail_rate), cmp && strip(ptsChip(dl.fail_rate_pts))]];
+  rows.forEach((r) => L.push(`| ${r[0]} | ${r[1]} |` + (cmp ? ` ${r[2]} | ${r[3]} |` : "")));
   L.push("", "## Who owns the latency", "", "| # | Owner | Share | ms / request | Code |", "|---:|---|---:|---:|---|");
   o.owners.slice(0, 6).forEach((x, i) => L.push(`| ${i + 1} | ${mdEsc(label(x))} | ${x.share_pct}% | ${fmt(x.per_request_ms)} | ${mdEsc(x.code ? (x.code.location || `${x.code.file}${x.code.function ? " " + x.code.function : ""}`) : "")} |`));
   L.push("", "## Findings", "");
@@ -1092,6 +1081,22 @@ function remedyPanel(p, l) {
       <div class="r-act">${r.actuator ? `<code>${esc(r.actuator.flags.join(" "))}</code> on ${esc(r.actuator.service)}` : ""}${actState(r.actuator, false, `targets ${r.service} ${r.op} (${r.share_pct}%)`)}</div></li>`).join("")}</ul></div>`;
   return html;
 }
+
+/* ---------- every finding is a query: show it, or run it in the Graph console ---------- */
+const cypherLiteral = (v) => typeof v === "number" ? String(v) : Array.isArray(v) ? `[${v.map(cypherLiteral).join(", ")}]` : `'${String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+const bindParams = (cy, params) => String(cy).replace(/\$([A-Za-z_]\w*)/g, (m, k) => (params && k in params ? cypherLiteral(params[k]) : m));
+function queryBox(cy, params) {
+  const bound = bindParams(cy, params);
+  return `<div class="f-q"><button class="linkish q-toggle" type="button" aria-expanded="false">Show query</button>
+    <div class="q-box" hidden><pre class="q-code">${esc(cy)}</pre>${params && Object.keys(params).length ? `<p class="hint">Parameters: ${Object.entries(params).map(([k, v]) => `<span class="mono">$${esc(k)} = ${esc(cypherLiteral(v))}</span>`).join(", ")}</p>` : ""}
+    <div class="q-actions"><button class="btn small" type="button" data-run-cypher="${esc(bound)}"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg>Run in Graph</button>${copyBtn(bound, "query")}</div></div></div>`;
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest?.(".q-toggle");
+  if (t) { const box = t.nextElementSibling, open = box.hidden; box.hidden = !open; t.setAttribute("aria-expanded", String(open)); t.textContent = open ? "Hide query" : "Show query"; return; }
+  const r = e.target.closest?.("[data-run-cypher]");
+  if (r) { e.preventDefault(); state.pendingCypher = r.dataset.runCypher; go("graph"); }
+});
 
 boot().catch((e) => {
   document.body.classList.remove("loading");

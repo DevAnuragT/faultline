@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="styles.css?v=sre2f">
+<link rel="stylesheet" href="styles.css?v=wire1a">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151c'/%3E%3Cpath d='M6 21 L12.5 11 L17.5 18 L21.5 13 L26 21' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 </head>
@@ -208,7 +208,8 @@
             </div>
           </article>
           <article class="panel">
-            <div class="panel-head"><div class="ttl"><h3>Slowest requests</h3><p class="sub">The ten slowest requests in this window. Open one to see its waterfall.</p></div></div>
+            <div class="panel-head"><div class="ttl"><h3>Requests</h3><p class="sub">Pick the request the waterfall shows, slowest first.</p></div>
+              <div class="seg" role="group" aria-label="Which requests to list"><button type="button" data-trace-filter="slowest" aria-pressed="true">Slowest</button><button type="button" data-trace-filter="errors" aria-pressed="false">With errors</button></div></div>
             <div class="table-wrap bleed">
               <table id="trace-list"><thead><tr><th>Trace</th><th class="num">ms</th><th>Status</th><th class="act"><span class="sr-only">Open</span></th></tr></thead>
                 <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
@@ -364,6 +365,6 @@
   <div class="sheet-foot"><span class="hint">Links keep the view, the window and the open trace, so they can be pasted into an incident channel.</span><button class="btn small" type="button" data-tour-start>Take the tour</button></div>
 </dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-<script src="app.js?v=sre2f"></script>
+<script src="app.js?v=wire1a"></script>
 </body>
 </html>
