@@ -31,6 +31,37 @@ hypothesis loop, in one queryable graph, with an agent that acts on it.** The hy
 from the graph (reverse reachability from the target), the experiment runs, the observed blast radius is written back
 next to the prediction, and the difference is the finding.
 
+## 2b. The current landscape (second research pass, Oct 16 evening)
+
+**Automated chaos at Netflix.** ChAP ran experiments as control/experiment canaries; uptake was low until **Monocle**
+(Basiri et al., *Automating Chaos Experiments in Production*, ICSE-SEIP 2019) discovered dependencies from telemetry
+and runtime config, ranked candidate experiments by a criticality score combined with a safety score and an experiment
+weight, and filtered out experiments that were unsafe, already running, failed and awaiting review, or run recently
+([summary](https://blog.acolyer.org/2019/07/05/automating-chaos-experiments-in-production/)). Faultline's planner is
+that ranking as graph queries: criticality from betweenness, traffic and blast radius; safety and recency from the
+Experiment ledger in the same graph; REFUTED-and-unreviewed targets skipped until a human reviews them.
+
+**Reliability scoring.** Gremlin discovers dependencies by sniffing DNS and sockets and scores each service from
+executed tests plus passively detected risks ([how it works](https://gremlin.com/blog/how-gremlins-reliability-score-works)).
+Faultline's evidence is the traces themselves, and the score is replaced by explicit findings with the query behind each.
+
+**Service-level fault injection in tests.** Filibuster (Meiklejohn et al., SoCC '21) extends functional test suites
+with injected dependency failures, later including database clients ([paper](https://people.eecs.berkeley.edu/~rohanpadhye/files/filibuster-socc21.pdf)).
+Complementary: Filibuster works pre-production from code; Faultline works from production shape.
+
+**AI SRE products (2026).** Datadog Bits AI, Resolve AI, Traversal, Cleric and Rootly investigate incidents from
+telemetry; Resolve keeps a continuously updated dependency graph, Traversal is criticised for not modelling topology as
+a graph, Cleric stops at proposing fixes for a human to ship ([comparison](https://metoro.io/blog/top-ai-sre-tools)).
+Research on LLM root-cause agents warns that agents reach correct answers without a sound diagnostic trail
+([Lu et al.](https://www.icsoft.org/article/study-finds-llm-rca-agents-can-reach-correct-answers-without-a-sound-diagnostic-trail.html)).
+Faultline's stance: the LLM never produces a verdict; every verdict (CONFIRMED/REFUTED, VERIFIED/REJECTED) is computed
+by comparing graph windows, every tool call is shown, and anything that touches the system needs a human click bound
+to a hash of the evidence.
+
+**Retries in telemetry.** OpenTelemetry's `http.request.resend_count` is stable but rarely emitted; Faultline detects
+retries structurally instead (a failed child span followed by a sibling of the same operation under the same parent),
+which works on any instrumentation ([semconv](https://opentelemetry.io/docs/specs/semconv/http/http-spans)).
+
 ## 3. Why this is a graph problem (and why FalkorDB is load-bearing)
 
 - **Critical path** is a path query over the span tree (CRISP's algorithm walks children by end time). Stored as
@@ -108,6 +139,21 @@ disclosed; live deployment preferred (read-only public site showing recorded win
 (:Experiment)-[:PREDICTED_IMPACT]->(:Operation)   -[:ACTUAL_IMPACT {error_rate, p95_ms}]->(:Operation)
 (:Fix {id, service, flags, rationale, verdict, status})-[:BEFORE]->(:Window) -[:AFTER]->(:Window)
 ```
+
+## 7b. What the agent does (built Oct 16 evening)
+
+Tools, all graph-backed: `overview`, `explain_critical_path` (CRISP top-down chain + bottom-up owners),
+`blast_radius` (the hypothesis), `rank_experiments` (Monocle ranking with ledger memory), `next_fix` (top owner → the
+knob that targets it, skipping VERIFIED ones), `guardrails` (timeouts = 3 × p95 per hop, retry budgets, fan-out caps,
+raised to high priority when an experiment showed a hang), `retries`, `history` (memory across sessions),
+`compare_windows` (drift: health, owners, edges added/removed), `propose_experiment`, `propose_fix`, `query_graph`
+(read-only). Proposals become Action nodes with a SHA-256 of their evidence; approval re-derives the evidence and
+refuses stale or tampered actions; execution is deterministic code; a REJECTED fix is rolled back automatically.
+
+Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
+`-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
+one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing
+→ Redis fan-out), which is the demo's through-line.
 
 ## 8. Plan
 

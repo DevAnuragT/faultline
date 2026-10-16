@@ -11,7 +11,19 @@ make baseline    # 40 parallel /dispatch requests -> a Window in FalkorDB with c
 make report      # critical-path owners, single points of failure, fan-out, hangs
 make experiment  # pause `route`: the graph predicts the blast radius, the run confirms or refutes it
 make fix         # apply HotROD's -M fix to `customer`; four gates decide VERIFIED / REJECTED; the graph names the next owner
+make run         # Streamlit UI: findings, experiment planner, agent, human approval, Cypher
+
+.venv/bin/python -m faultline.cli agent "What should we fix first?"   # Gemini proposes; nothing runs
+.venv/bin/python -m faultline.cli actions                              # the proposal, with its evidence hash
+.venv/bin/python -m faultline.cli approve act-xxxxxxxx                 # human approval -> apply -> re-measure -> verdict
 ```
+
+**How it decides.** Critical paths (CRISP) say who owns the latency. Betweenness and reverse reachability say who is a
+single point of failure and what breaks if it stops: that prediction is the hypothesis of a chaos experiment, and the
+observed window confirms or refutes it. Fixes are judged by gates between two windows and rolled back if rejected.
+The experiment planner ranks targets the way Netflix's Monocle did (criticality × safety, recency, review gate), with
+the experiment ledger in the graph as its memory. The agent (Gemini, tool-calling) only reads the graph and proposes;
+a human approves; approval is bound to a hash of the evidence.
 
 Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 

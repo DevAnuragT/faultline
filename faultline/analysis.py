@@ -93,6 +93,36 @@ def root_health(st: Store, window: str, factor: float = HANG_FACTOR, baseline_p5
              "p50_ms": round(r[4], 1), "p95_ms": round(r[5], 1)} for r in rows]
 
 
+def retries(st: Store, window: str) -> list[dict]:
+    """Silent retries: a child span of the same operation started after an errored sibling under the same parent."""
+    _, rows = st.ro("""
+        MATCH (c1:Span {window:$w, error:true})-[:CHILD_OF]->(p:Span)<-[:CHILD_OF]-(c2:Span)
+        WHERE c1.op = c2.op AND c1.service = c2.service AND c2.start_us > c1.start_us
+        WITH c1, p, min(c2.start_us) AS nxt
+        MATCH (c2:Span {trace:c1.trace, start_us:nxt, op:c1.op})-[:CHILD_OF]->(p)
+        WITH c1.service AS service, c1.op AS op, count(DISTINCT c1) AS retried_errors, sum(c1.duration_us)/1000.0 AS wasted_ms,
+             count(DISTINCT c1.trace) AS traces, sum(CASE WHEN c2.critical THEN 1 ELSE 0 END) AS on_critical
+        RETURN service, op, retried_errors, wasted_ms, traces, on_critical ORDER BY wasted_ms DESC""", {"w": window})
+    _, n = st.ro("MATCH (t:Trace {window:$w}) RETURN count(t)", {"w": window})
+    total = n[0][0] or 1
+    return [{"service": r[0], "op": r[1], "retried_errors": r[2], "wasted_ms_per_request": round(r[3] / total, 1), "traces": r[4],
+             "retries_on_critical_path": r[5]} for r in rows]
+
+
+def critical_chain(st: Store, window: str, root_op: str | None = None) -> list[dict]:
+    """Top-down: the critical path of the slowest steady-state trace, as an ordered chain of (service, op, self ms)."""
+    _, rows = st.ro("""
+        MATCH (t:Trace {window:$w}) WHERE $root IS NULL OR t.root = $root
+        WITH t.root AS root, percentileDisc(t.duration_ms, 0.5) AS med, collect(t) AS ts
+        UNWIND ts AS t WITH t WHERE t.duration_ms <= $f * med
+        WITH t ORDER BY t.duration_ms DESC LIMIT 1
+        MATCH (s:Span {critical:true})-[:OF]->(t)
+        RETURN t.id, t.duration_ms, s.service, s.op, s.peer, s.start_us, s.duration_us, s.self_us, s.error
+        ORDER BY s.start_us""", {"w": window, "root": root_op, "f": HANG_FACTOR})
+    return [{"trace": r[0], "trace_ms": round(r[1], 1), "service": r[2], "op": r[3], "peer": r[4] or "", "offset_ms": 0.0,
+             "duration_ms": round(r[6] / 1000, 1), "self_ms": round(r[7] / 1000, 1), "error": r[8]} for r in rows] if rows else []
+
+
 def findings(st: Store, window: str) -> list[dict]:
     out: list[dict] = []
     for o in critical_owners(st, window)[:3]:
@@ -106,25 +136,33 @@ def findings(st: Store, window: str) -> list[dict]:
                               f"({f['errors']} errors, p95 {f['p95_ms']} ms); amplifies both latency and load"})
     grouped: dict[tuple, list[dict]] = {}
     for h in hangs(st, window):
-        grouped.setdefault((h["root"], h["worst"]["service"], h["worst"]["op"], h["worst"].get("peer", "")), []).append(h)
-    for (root, svc, op, peer), hs in grouped.items():
-        worst = max(hs, key=lambda h: h["duration_ms"])
+        grouped.setdefault((h["root"], h["worst"]["service"], h["worst"].get("peer", "")), []).append(h)
+    for (root, svc, peer), hs in grouped.items():
+        worst = max(hs, key=lambda h: h["duration_ms"]); op = worst["worst"]["op"]
         out.append({"kind": "hang_not_fail", "severity": "high", "service": svc,
                     "detail": f"{len(hs)} request(s) to {root} hung for up to {worst['duration_ms']/1000:.1f} s (median {worst['median_ms']:.0f} ms) "
                               f"and still returned {worst['status'] or 'no status'}: the time went waiting in {label({'service': svc, 'op': op, 'peer': peer})}; "
                               f"no timeout, no fail-fast"})
+    for r in retries(st, window):
+        if r["retried_errors"] >= 3:
+            out.append({"kind": "silent_retry", "severity": "medium", "service": r["service"],
+                        "detail": f"{r['service']} {r['op']}: {r['retried_errors']} failed calls were retried in {r['traces']} requests, "
+                                  f"{r['wasted_ms_per_request']} ms per request spent on the failed attempt; {r['retries_on_critical_path']} retries land on the critical path"})
     centrality = {s["service"]: s for s in single_points_of_failure(st, window)}
     _, svcs = st.ro("MATCH (s:Service) WHERE ()-[:CALLS {window:$w}]->(s) RETURN s.name", {"w": window})
+    transit, leaves, roots_hit, total = [], [], set(), 0
     for (name,) in svcs:
         br = blast_radius(st, window, name)
-        roots = [r for r in br["root_operations"]]
-        if not roots:
+        if not br["root_operations"]:
             continue
-        c = centrality.get(name, {})
-        out.append({"kind": "single_point_of_failure", "severity": "high" if c.get("betweenness", 0) > 0 else "medium", "service": name,
-                    "detail": f"every recorded path to {', '.join(r['op'] for r in roots)} runs through {name} "
-                              f"({c.get('inbound_calls', 0):.0f} inbound calls, betweenness {c.get('betweenness', 0):.0f}); "
-                              f"the graph predicts stopping it fails {sum(r['traces'] for r in roots)}/{sum(r['traces'] for r in roots)} requests"})
+        roots_hit |= {r["op"] for r in br["root_operations"]}
+        total = max(total, sum(r["traces"] for r in br["root_operations"]))
+        (transit if centrality.get(name, {}).get("betweenness", 0) > 0 else leaves).append(name)
+    if transit or leaves:
+        out.append({"kind": "single_point_of_failure", "severity": "high", "service": (transit or leaves)[0],
+                    "detail": f"no redundancy anywhere: every recorded path to {', '.join(sorted(roots_hit))} runs through "
+                              f"{', '.join(transit)} (transit, betweenness > 0) and {', '.join(leaves)} (leaves); the graph predicts stopping "
+                              f"any one of them fails {total}/{total} requests", "services": transit + leaves})
     return out
 
 

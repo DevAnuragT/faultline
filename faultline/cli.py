@@ -5,7 +5,7 @@ import argparse
 import json
 import shlex
 
-from . import analysis, experiments, ingest, load
+from . import actions, analysis, experiments, ingest, load
 from .graph import Store
 
 
@@ -19,6 +19,10 @@ def main() -> None:
     p = sub.add_parser("blast"); p.add_argument("service"); p.add_argument("--window", default=None)
     p = sub.add_parser("experiment"); p.add_argument("service"); p.add_argument("--baseline", default=None); p.add_argument("--n", type=int, default=6)
     p = sub.add_parser("fix", help="apply one HotROD fix flag (-M | -D <dur> | -W <n>) and verify it in the graph"); p.add_argument("--flags", required=True, help="write it as --flags=-M or --flags=\"-W 100\" (the leading dash needs the = form)"); p.add_argument("--baseline", default=None)
+    p = sub.add_parser("agent"); p.add_argument("question")
+    p = sub.add_parser("actions"); p.add_argument("--status", default=None)
+    p = sub.add_parser("approve"); p.add_argument("action_id")
+    p = sub.add_parser("reject"); p.add_argument("action_id"); p.add_argument("--why", default="")
     sub.add_parser("revert")
     sub.add_parser("reset")
     a = ap.parse_args()
@@ -37,6 +41,19 @@ def main() -> None:
         r = ingest.ingest_window(st, a.label, limit=a.limit, lookback=a.lookback)
         n = analysis.record_findings(st, r["window"], analysis.findings(st, r["window"]))
         print(f"{n} findings recorded"); return
+    if a.cmd == "agent":
+        from .agent import Agent
+        ag = Agent(st); reply, trace = ag.ask(a.question)
+        for t in trace:
+            print(f"  -> {t['tool']}({', '.join(f'{k}={v!r}' for k, v in t['args'].items())})")
+        print(f"[{ag.model or 'offline'}]\n{reply}"); return
+    if a.cmd == "actions":
+        for x in actions.list_actions(st, a.status):
+            print(f"{x['id']}  {x['status']:<9} {x['type']:<10} {x['subject']:<10} {x['title']}  " + (f"-> {x['result']}" if x["result"] else "")); return
+    if a.cmd == "approve":
+        print(json.dumps(actions.approve(st, a.action_id), indent=2)); return
+    if a.cmd == "reject":
+        print(actions.reject(st, a.action_id, a.why)); return
     if a.cmd == "revert":
         experiments.revert_fixes(); return
     if a.cmd == "experiment":

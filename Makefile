@@ -18,3 +18,5 @@ report:
 	$(PY) -m faultline.cli report
 test:
 	$(PY) -m pytest tests -q
+run:
+	.venv/bin/streamlit run streamlit_app.py

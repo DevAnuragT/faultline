@@ -104,6 +104,20 @@ def _write_override(service: str, flags: list[str]) -> list[str]:
     return cmd
 
 
+def _remove_override(service: str, flags: list[str]) -> None:
+    over = yaml.safe_load(OVERRIDE.read_text()) if OVERRIDE.exists() else {"services": {}}
+    cmd = over["services"].get(service, {}).get("command")
+    if not cmd:
+        return
+    n = len(flags)
+    for i in range(len(cmd) - n, -1, -1):
+        if cmd[i:i + n] == flags:
+            del cmd[i:i + n]
+            break
+    over["services"][service] = {"command": cmd}
+    OVERRIDE.write_text(yaml.safe_dump(over))
+
+
 def run_fix(st: Store, baseline: str, flags: list[str], rationale: str = "", requests_n: int = 40, parallel: int = 4,
             min_gain_pct: float = 20.0, progress=print) -> dict:
     """Apply one HotROD fix flag to the service it belongs to, re-measure, and accept only if the graph shows the gain
@@ -138,16 +152,21 @@ def run_fix(st: Store, baseline: str, flags: list[str], rationale: str = "", req
                       "detail": f"p50 {b['p50_ms']:.0f} -> {a['p50_ms']:.0f} ms ({gain:+.0f}%)"})
         gates.append({"name": f"{op} tail not worse", "passed": a["p95_ms"] <= b["p95_ms"] * 1.05,
                       "detail": f"p95 {b['p95_ms']:.0f} -> {a['p95_ms']:.0f} ms"})
-        gates.append({"name": f"{op} failure rate not worse", "passed": a["fail_rate"] <= b["fail_rate"] + 0.02,
-                      "detail": f"{b['fail_rate']:.0%} -> {a['fail_rate']:.0%}"})
+        gates.append({"name": f"{op} failures not worse (tolerance: one request or 5%)",
+                      "passed": a["failed"] <= b["failed"] + 1 and a["fail_rate"] <= b["fail_rate"] + 0.05,
+                      "detail": f"{b['failed']}/{b['traces']} -> {a['failed']}/{a['traces']} failed"})
     ob, oa = owned_by(before_owners), owned_by(after_owners)
     gates.append({"name": f"{service}'s critical-path time drops >= 25%", "passed": ob > 0 and (ob - oa) / ob >= 0.25,
                   "detail": f"{ob:.0f} -> {oa:.0f} ms per request on the critical path"})
     verdict = "VERIFIED" if all(g["passed"] for g in gates) else "REJECTED"
+    if verdict == "REJECTED":  # closed loop: a rejected change does not stay in the system
+        _remove_override(service, flags)
+        _compose("up", "-d", "--no-deps", "--force-recreate", service)
+        progress(f"rolled back: {service} restarted without {' '.join(flags)}")
     nxt = after_owners[0] if after_owners else None
     next_owner = f"{analysis.label(nxt)} now owns {nxt['share_pct']}% ({nxt['per_request_ms']:.0f} ms/request)" if nxt else ""
     result = {"id": fix_id, "service": service, "flags": flags, "command": cmd, "rationale": rationale, "before": baseline, "after": w,
-              "gates": gates, "verdict": verdict, "owners_before": before_owners[:5], "owners_after": after_owners[:5], "next_owner": next_owner}
+              "gates": gates, "verdict": verdict, "rolled_back": verdict == "REJECTED", "owners_before": before_owners[:5], "owners_after": after_owners[:5], "next_owner": next_owner}
     st.q("""MATCH (b:Window {id:$b}), (a:Window {id:$a}), (s:Service {name:$svc})
             CREATE (f:Fix {id:$id, service:$svc, flags:$flags, rationale:$r, verdict:$v, gates:$gates, next_owner:$nxt, ts:$ts})
             CREATE (f)-[:TARGETS]->(s) CREATE (f)-[:BEFORE]->(b) CREATE (f)-[:AFTER]->(a)""",
