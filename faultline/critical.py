@@ -26,14 +26,18 @@ def critical_path(spans: list[dict]) -> tuple[list[str], dict[str, int]]:
 
     def walk(span: dict) -> None:
         path.append(span["id"])
-        frontier = end(span)
-        chosen: list[dict] = []
-        for c in sorted(children.get(span["id"], []), key=end, reverse=True):
-            if end(c) <= frontier and c["start_us"] >= span["start_us"]:
-                chosen.append(c)
+        parent_end = end(span)
+        frontier = parent_end
+        chosen: list[tuple[dict, int]] = []
+        # A child may end after its parent (a cancelled call whose client span closes late): clamp it to the parent's end
+        # so the wait still lands on the child instead of being counted as the parent's own time.
+        for c in sorted(children.get(span["id"], []), key=lambda c: min(end(c), parent_end), reverse=True):
+            ce = min(end(c), parent_end)
+            if ce <= frontier and c["start_us"] >= span["start_us"] and ce > c["start_us"]:
+                chosen.append((c, ce - c["start_us"]))
                 frontier = c["start_us"]
-        self_us[span["id"]] = max(span["duration_us"] - sum(c["duration_us"] for c in chosen), 0)
-        for c in chosen:  # latest-ending first keeps the path in reverse time order; order does not matter for sums
+        self_us[span["id"]] = max(span["duration_us"] - sum(d for _, d in chosen), 0)
+        for c, _ in chosen:
             walk(c)
 
     walk(root)

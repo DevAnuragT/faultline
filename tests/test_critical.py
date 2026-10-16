@@ -30,3 +30,11 @@ def test_nested_path_and_overlap_skips_overlapping_sibling():
 def test_missing_parent_treated_as_root():
     spans = [span("orphan", "ghost", 0, 10)]
     assert critical_path(spans)[0] == ["orphan"]
+
+
+def test_child_ending_after_parent_still_owns_the_wait():
+    # a cancelled downstream call: the client span closes 500us after the server span that waited on it
+    spans = [span("root", None, 0, 35000), span("hung", "root", 100, 35400)]
+    path, self_us = critical_path(spans)
+    assert set(path) == {"root", "hung"}
+    assert self_us["root"] == 100 and self_us["hung"] == 35400
