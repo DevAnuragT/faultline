@@ -182,7 +182,8 @@ def pick_target() -> targets.Target:
             except Exception:
                 pass
         names = ready or [targets.DEFAULT]
-    default = config.TARGET if config.TARGET in names else names[0]
+    wanted = getattr(config, "TARGET", targets.DEFAULT)  # getattr: survives a hot-reload with a stale config module
+    default = wanted if wanted in names else names[0]
     if len(names) == 1:
         return targets.get(names[0])
     with st.sidebar:
