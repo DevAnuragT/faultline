@@ -82,6 +82,8 @@ def record_agent(st: Store, prompts: list[str] | None = None) -> dict:
         reply, trace = agent.ask(prompt)
         if not trace:
             raise RuntimeError(f"the agent answered {prompt!r} without calling a tool; record again")
+        if "Gemini unavailable" in reply:  # offline fallback text: never record it as a Gemini answer
+            raise RuntimeError(f"Gemini failed on {prompt!r}; not recording the offline fallback")
         turns.append({"prompt": prompt, "reply": reply,
                       "trace": [{"tool": t["tool"], "args": t["args"], "summary": _compact(t["result"])} for t in trace]})
     findings = analysis.latest_findings(st)
