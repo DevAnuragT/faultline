@@ -118,6 +118,18 @@ def code_pointer(service: str, op: str) -> dict:
 
 
 @mcp.tool()
+def read_source(service: str, op: str) -> dict:
+    """The function behind an operation: file, lines, code, url."""
+    return box().read_source(service, op)
+
+
+@mcp.tool()
+def propose_code_change(service: str, op: str, patch: str, summary: str) -> dict:
+    """Propose a unified-diff change to a function read with read_source; a human approves; becomes a draft PR."""
+    return box().propose_code_change(service, op, patch, summary)
+
+
+@mcp.tool()
 def propose_incident_issue(window: str, rationale: str = "") -> dict:
     """Propose an incident issue for a regressed window; a human approves before anything is filed."""
     return box().propose_incident_issue(window, rationale)

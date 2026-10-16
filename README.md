@@ -107,6 +107,12 @@ Every change the agent proposes can leave the graph as something a team reviews:
   PR body are written under `out/pr/`.
 - **Incident issue** (`propose_incident_issue <window>`): any window whose failure rate or p95 regressed against the steady-state
   window becomes an issue with the before/after table, the owner that moved, the hop and the code to look at, and the worst trace.
+- **The agent reads the code it cites.** `read_source(service, op)` returns the function behind an operation (file, line
+  range, code, link) from a local checkout (`SOURCE_ROOT`) or the public repository, and the rules forbid describing code it
+  has not read. `propose_code_change(service, op, patch, summary)` takes a unified diff: it is rejected unless every removed
+  line exists in that function, and on approval it becomes a draft PR carrying the patch, the quoted source, the evidence and
+  the code hash. If the source changes before approval, the action goes stale. The graph still decides where and why; the
+  model drafts what; a person approves; nothing is applied to a running system by Faultline.
 - **Code pointers**: spans carry OpenTelemetry's `code.function.name` / `code.file.path` / `code.line.number` when the
   instrumentation emits them; for HotROD, which does not, an explicit source map (`faultline/code.py`) names the file and function
   behind each operation and the config symbol behind each flag. The site links them; the agent cites them; nothing is guessed.

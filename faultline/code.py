@@ -20,7 +20,7 @@ TABLE: dict[tuple[str, str], dict] = {
     ("frontend", "HTTP GET"): {"file": "services/frontend/best_eta.go", "function": "bestETA.getRoutes",
                                "why": "fans out one route call per driver through a worker pool (-W); the HTTP client has no short timeout"},
     ("frontend", "GET /dispatch"): {"file": "services/frontend/server.go", "function": "Server.dispatch", "why": "entry point"},
-    ("frontend", "driver.DriverService/FindNearest"): {"file": "services/frontend/best_eta.go", "function": "bestETA.getDrivers", "why": "gRPC client call"},
+    ("frontend", "driver.DriverService/FindNearest"): {"file": "services/frontend/best_eta.go", "function": "bestETA.Get", "why": "the dispatch flow: customer, then drivers over gRPC, then routes"},
 }
 FLAG_SOURCE = {"-M": ("services/config/config.go", "MySQLMutexDisabled"), "-D": ("services/config/config.go", "MySQLGetDelay"),
                "-W": ("services/config/config.go", "RouteWorkerPoolSize")}

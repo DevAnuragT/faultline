@@ -40,7 +40,8 @@ def _fix_payload(st: Store, flags: list[str]) -> dict:
 def _store(st: Store, payload: dict, title: str, rationale: str) -> dict:
     guard.require_writable("proposing an action")  # visitors of the public site read the recorded ledger only
     subject = {"experiment": payload.get("target"), "fix": " ".join(payload.get("flags", [])), "guardrail": payload.get("hop"),
-               "issue": payload.get("window"), "pr": payload.get("subject")}[payload["type"]]
+               "issue": payload.get("window"), "pr": payload.get("subject"),
+               "code_change": f"{payload.get('service')} {payload.get('op')} {payload.get('patch_sha', '')[:8]}"}[payload["type"]]
     dup = st.q("MATCH (a:Action {type:$t, subject:$s, status:'proposed'}) RETURN a.id", {"t": payload["type"], "s": subject})
     if dup:
         return {"ok": True, "action": dup[0][0], "status": "proposed", "note": "already proposed; awaiting approval"}
@@ -102,10 +103,10 @@ def propose_fix(st: Store, flags: list[str], rationale: str = "") -> dict:
 
 
 def list_actions(st: Store, status: str | None = None) -> list[dict]:
-    _, rows = st.ro("MATCH (a:Action) WHERE $s IS NULL OR a.status = $s RETURN a.id, a.type, a.subject, a.status, a.title, a.rationale, a.hash, a.ts, a.result ORDER BY a.ts DESC",
+    _, rows = st.ro("MATCH (a:Action) WHERE $s IS NULL OR a.status = $s RETURN a.id, a.type, a.subject, a.status, a.title, a.rationale, a.hash, a.ts, a.result, a.body ORDER BY a.ts DESC",
                     {"s": status})
     return [{"id": r[0], "type": r[1], "subject": r[2], "status": r[3], "title": r[4], "rationale": r[5], "hash": (r[6] or "")[:12], "ts": r[7],
-             "result": json.loads(r[8]) if r[8] else None} for r in rows]
+             "result": json.loads(r[8]) if r[8] else None, "body": r[9]} for r in rows]
 
 
 def approve(st: Store, action_id: str, progress=print) -> dict:
@@ -123,7 +124,8 @@ def approve(st: Store, action_id: str, progress=print) -> dict:
         return {"ok": False, "error": "stored payload does not match its hash"}
     fresh = (_experiment_payload(st, payload["target"]) if typ == "experiment" else _fix_payload(st, payload["flags"]) if typ == "fix"
              else _guardrail_payload(st, payload["hop"]) if typ == "guardrail" else _issue_payload(st, payload["window"]) if typ == "issue"
-             else _pr_payload(st, payload["subject"]))
+             else _pr_payload(st, payload["subject"]) if typ == "pr"
+             else _code_change_payload(st, payload["service"], payload["op"], st.q("MATCH (a:Action {id:$id}) RETURN a.body", {"id": action_id})[0][0] or ""))
     if payload_hash(fresh) != h:
         st.q("MATCH (a:Action {id:$id}) SET a.status = 'stale', a.stale_reason = $r", {"id": action_id, "r": canonical(fresh)})
         return {"ok": False, "error": "evidence changed since this was proposed (new window or different prediction); re-propose", "now": fresh}
@@ -133,6 +135,9 @@ def approve(st: Store, action_id: str, progress=print) -> dict:
             summary = _execute_issue(st, payload)
         elif typ == "pr":
             summary = _execute_pr(st, payload)
+        elif typ == "code_change":
+            summary = _execute_pr(st, {"subject": action_id, "kind": "code_change", "repo": config.GITHUB_REPO or "local-dry-run", "base": config.GITHUB_BASE,
+                                       "branch": f"fl/{action_id}", "files": {p: _sha(t) for p, t in _code_change_files(st, action_id).items()}})
         elif typ == "guardrail":
             out = config.ROOT / "out" / "guardrails"
             out.mkdir(parents=True, exist_ok=True)
@@ -253,7 +258,7 @@ def _experiment_files(st: Store, exp_id: str) -> dict[str, str] | None:
 
 
 def pr_files(st: Store, subject: str) -> tuple[str, dict[str, str]] | None:
-    for kind, fn in (("fix", _fix_files), ("guardrail", _guardrail_files), ("experiment", _experiment_files)):
+    for kind, fn in (("fix", _fix_files), ("guardrail", _guardrail_files), ("experiment", _experiment_files), ("code_change", _code_change_files)):
         files = fn(st, subject)
         if files:
             return kind, files
@@ -336,3 +341,50 @@ def _execute_pr(st: Store, payload: dict) -> dict:
     if pr.returncode:
         raise RuntimeError(f"cannot open PR: {pr.stderr.strip()[-200:]}")
     return {"opened": pr.stdout.strip(), "files": sorted(files)}
+
+
+# ------------------------------------------------------------------------------------------ code change proposals
+from . import source as srcmod
+
+
+def _code_change_payload(st: Store, service: str, op: str, patch: str) -> dict | None:
+    src = srcmod.read(service, op)
+    if "error" in src:
+        return None
+    return {"type": "code_change", "service": service, "op": op, "file": src["file"], "function": src["function"], "code_sha": src["sha"],
+            "patch_sha": _sha(patch), "baseline": ingest.latest_window(st)}
+
+
+def propose_code_change(st: Store, service: str, op: str, patch: str, summary: str, rationale: str = "") -> dict:
+    """Propose (not apply) a code change to the function behind an operation. The patch must only touch lines that exist in
+    that function; approval opens a draft PR carrying the patch, the evidence and the quoted source, bound to the code hash."""
+    src = srcmod.read(service, op)
+    if "error" in src:
+        return {"ok": False, "error": src["error"]}
+    problems = srcmod.check_patch(patch, src["code"])
+    if problems:
+        return {"ok": False, "error": "patch rejected: " + "; ".join(problems), "function": src["function"], "file": src["file"]}
+    try:
+        p = _code_change_payload(st, service, op, patch)
+        res = _store(st, p, f"Code change in {src['function']} ({src['file']}): {summary[:80]}", rationale or summary)
+        if res.get("ok") and res.get("status") == "proposed" and "note" not in res:
+            st.q("MATCH (a:Action {id:$id}) SET a.body = $patch, a.summary = $s", {"id": res["action"], "patch": patch, "s": summary})
+        return res
+    except guard.ReadOnlyError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _code_change_files(st: Store, action_id: str) -> dict[str, str] | None:
+    rows = st.q("MATCH (a:Action {id:$id, type:'code_change'}) RETURN a.payload, a.body, a.summary, a.rationale", {"id": action_id})
+    if not rows:
+        return None
+    payload, patch, summary, rationale = json.loads(rows[0][0]), rows[0][1], rows[0][2], rows[0][3]
+    src = srcmod.read(payload["service"], payload["op"])
+    if "error" in src or src["sha"] != payload["code_sha"]:
+        raise RuntimeError("the source changed since this was proposed")
+    base = payload["file"].split("/")[-1]
+    note = (f"# {summary}\n\nTarget: `{payload['file']}` lines {src['start_line']}-{src['end_line']}, `{payload['function']}` ({src.get('url', '')}).\n\n"
+            f"**Why (from the trace graph):** {rationale}\n\n**Current code**\n\n```go\n{src['code']}\n```\n\n**Proposed patch** (`{base}.patch`)\n\n"
+            f"The patch was drafted by the agent after reading this function, checked to touch only lines that exist in it, and approved by a person. "
+            f"Window `{payload['baseline']}`, code hash `{payload['code_sha']}`.\n")
+    return {f"proposals/code/{action_id}/{base}.patch": patch, f"proposals/code/{action_id}/README.md": note}

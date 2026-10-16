@@ -1,11 +1,10 @@
 """Gemini function-calling agent. Every fact comes from a graph tool; the model explains and proposes, it never
 executes: humans approve actions, deterministic code runs them. Each tool call is recorded for the UI."""
-from __future__ import annotations
 
 import re
 import time
 
-from . import actions, analysis, code, config, experiments, ingest, llm, planner
+from . import actions, analysis, code, config, experiments, ingest, llm, planner, source
 from .graph import Store
 
 SYSTEM = """You are Faultline, a reliability agent. Your only knowledge of the system comes from tools that query a
@@ -32,6 +31,10 @@ Rules:
   the numbers before and after, the owner that moved, the hop and the code pointer; offer propose_incident_issue.
 - After a fix is VERIFIED or a guardrail action is done, offer propose_pr with its id so the change leaves the graph as a
   reviewable draft PR. When asked where in the code a problem is, call code_pointer; if it returns an error say so.
+- When a remedy has no actuator (advice: "a code change"), or the user asks what to change in the code: call read_source
+  for that service and operation, quote the relevant lines, and explain the change in terms of them. If the user asks you
+  to propose it, call propose_code_change with a unified diff that only removes lines you read; if the tool rejects the
+  patch, say why and do not claim anything was proposed. Never describe code you did not read.
 - If a tool returns {"error": ...}, quote that error. Never claim a tool failed or was unavailable unless its result
   says so, and never describe an action you did not call a tool for.
 - Be concise: short paragraphs or bullets, no filler, no praise."""
@@ -177,6 +180,28 @@ class Toolbox:
         self._log("code_pointer", {"service": service, "op": op}, res)
         return res
 
+    def read_source(self, service: str, op: str) -> dict:
+        """Read the function behind an operation (file, line range, code, url) from the service's source: the span's own
+        code attributes when present, otherwise the demo source map. Read it BEFORE explaining a remedy in code terms or
+        proposing a code change; quote only lines it returns."""
+        res = source.read(service, op)
+        self._log("read_source", {"service": service, "op": op}, res)
+        return res
+
+    def propose_code_change(self, service: str, op: str, patch: str, summary: str) -> dict:
+        """Propose (not apply) a code change to the function read with read_source. `patch` is a unified diff that only
+        removes lines present in that function and adds the replacement; `summary` is one line for reviewers. The patch
+        is checked against the real source and, on human approval, becomes a draft PR with the evidence and the quoted
+        code. Never propose a change to code you have not read."""
+        read = any(t["tool"] == "read_source" and t["args"].get("service") == service and t["args"].get("op") == op
+                   and "code" in (t["result"] or {}) for t in self.trace)
+        if not read:  # enforced here, not in the prompt: no patch against code this conversation never read
+            res = {"ok": False, "error": f"refused: call read_source({service!r}, {op!r}) first; a change can only be proposed against code that was read"}
+        else:
+            res = actions.propose_code_change(self.st, service, op, patch, summary)
+        self._log("propose_code_change", {"service": service, "op": op, "summary": summary}, res)
+        return res
+
     def propose_incident_issue(self, window: str, rationale: str = "") -> dict:
         """Propose (not file) an incident issue for a window that regressed against steady state. A human approves; the
         issue carries the before/after numbers, the owner that moved, the hop and code to look at, and the worst trace."""
@@ -225,7 +250,7 @@ class Toolbox:
 
     def _raw_tools(self) -> list:
         return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.remedies, self.next_fix, self.guardrails,
-                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.incidents, self.code_pointer, self.propose_incident_issue, self.propose_pr, self.query_graph]
+                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.incidents, self.code_pointer, self.read_source, self.propose_code_change, self.propose_incident_issue, self.propose_pr, self.query_graph]
 
 
 class Agent:
@@ -260,6 +285,17 @@ class Agent:
             system_instruction=SYSTEM, tools=self.box.tools(), temperature=0))
 
     def ask(self, message: str) -> tuple[str, list[dict]]:
+        reply, trace = self._ask(message)
+        return self._honesty(reply, trace), trace
+
+    @staticmethod
+    def _honesty(reply: str, trace: list[dict]) -> str:
+        """Deterministic guard: code shown in an answer without a read_source call in that turn is not from the repository."""
+        if "```" in reply and not any(t["tool"] == "read_source" and "code" in (t["result"] or {}) for t in trace):
+            return "(Warning: this answer shows code, but no source was read in this turn. Treat the snippet as illustrative, not as the repository's code.)\n\n" + reply
+        return reply
+
+    def _ask(self, message: str) -> tuple[str, list[dict]]:
         start = len(self.box.trace)
         if self.provider == "claude":
             try:

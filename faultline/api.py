@@ -128,6 +128,10 @@ class Proposal(BaseModel):
     hop: str = ""
     window: str = ""
     subject: str = ""
+    service: str = ""
+    op: str = ""
+    patch: str = ""
+    summary: str = ""
     rationale: str = ""
 
 
@@ -144,7 +148,15 @@ def propose(p: Proposal):
         return actions.propose_issue(s, p.window, p.rationale)
     if p.type == "pr":
         return actions.propose_pr(s, p.subject, p.rationale)
-    raise HTTPException(400, "type must be experiment, fix, guardrail, issue or pr")
+    if p.type == "code_change":
+        return actions.propose_code_change(s, p.service, p.op, p.patch, p.summary, p.rationale)
+    raise HTTPException(400, "type must be experiment, fix, guardrail, issue, pr or code_change")
+
+
+@app.get("/api/source")
+def read_source(service: str, op: str):
+    from faultline import source
+    return source.read(service, op)
 
 
 @app.post("/api/actions/{action_id}/approve")

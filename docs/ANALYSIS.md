@@ -178,6 +178,12 @@ route are starved), and the graph added a lesson nobody wrote: six MySQL calls r
 caller had already given up. No deadline reached the callee, so the work ran late for nobody. The timestamp of the last
 caller giving up is recorded in the experiment, and the window is flagged as an experiment, never steady state.
 
+**Code, not only traces (Oct 16, late night).** The founder asked whether suggestions are trace-only. They were. Now the
+agent has `read_source`, which returns the function behind an operation from the service's repository, and
+`propose_code_change`, which accepts a unified diff only if every removed line exists in that function and binds the
+approval to a hash of the code. The remedy still comes from the graph; the model only drafts the change after reading
+the real lines; the draft PR carries the quoted source and the evidence.
+
 Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
 `-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing
