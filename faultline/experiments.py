@@ -42,10 +42,11 @@ def _compose(*args: str, check: bool = True) -> str:
 
 
 def _calls_per_trace(st: Store, window: str) -> dict[str, dict]:
-    """Server-side work per service in a window: spans that are not client spans, per trace, and their error rate."""
+    """Work per service in a window: its spans per trace and their error rate (simulated stores emit client-kind spans,
+    so every span counts; the comparison is always baseline against experiment for the same service)."""
     _, n = st.ro("MATCH (t:Trace {window:$w}) RETURN count(t)", {"w": window})
     traces = max(n[0][0] if n else 0, 1)
-    _, rows = st.ro("MATCH (s:Span {window:$w}) WHERE s.kind <> 'client' RETURN s.service, count(s), sum(CASE WHEN s.error THEN 1 ELSE 0 END)", {"w": window})
+    _, rows = st.ro("MATCH (s:Span {window:$w}) RETURN s.service, count(s), sum(CASE WHEN s.error THEN 1 ELSE 0 END)", {"w": window})
     return {r[0]: {"calls_per_trace": (r[1] or 0) / traces, "error_rate": ((r[2] or 0) / r[1]) if r[1] else 0.0} for r in rows}
 
 
@@ -73,7 +74,8 @@ def hypothesis(st: Store, window: str, service: str) -> dict:
     t0 = order.get(service, 0.0)
     from . import config
     keep = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t < t0 and calls.get(s, {}).get("calls_per_trace", 0) > 0)
-    starved = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t >= t0 and s not in br["dependent_services"])
+    starved = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t >= t0 and s not in br["dependent_services"]
+                     and calls.get(s, {}).get("calls_per_trace", 0) > 0)
     text = (f"If {service} stops, {', '.join(p['op'] for p in predicted) or 'nothing recorded'} fail(s) "
             f"({', '.join(br['dependent_services'])} depend on it); "
             + (f"{', '.join(keep)} keep answering (called before {service}); " if keep else "")
