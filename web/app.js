@@ -95,12 +95,12 @@ function drawGraph(o) {
   const nodes = [...names].map((id) => ({ id, share: share[id] || 0, store: stores.has(id), edge: state.meta.edge.includes(id) }));
   const links = o.graph.map((e) => ({ source: e.from, target: e.to, ...e }));
   const ember = css("--ember"), slate = css("--slate"), crit = css("--crit"), store = css("--store"), panel = css("--panel"), line2 = css("--line-2");
-  const sim = d3.forceSimulation(nodes).force("link", d3.forceLink(links).id((d) => d.id).distance(130)).force("charge", d3.forceManyBody().strength(-700))
+  const sim = d3.forceSimulation(nodes).force("link", d3.forceLink(links).id((d) => d.id).distance(170)).force("charge", d3.forceManyBody().strength(-1400)).force("collide", d3.forceCollide(62))
     .force("center", d3.forceCenter(W / 2, H / 2)).force("x", d3.forceX((d) => d.edge ? W * 0.18 : d.store ? W * 0.82 : W / 2).strength(0.25)).force("y", d3.forceY(H / 2).strength(0.05));
   svg.append("defs").append("marker").attr("id", "arrow").attr("viewBox", "0 -4 8 8").attr("refX", 50).attr("markerWidth", 9).attr("markerHeight", 9).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
     .append("path").attr("d", "M0,-4L8,0L0,4").attr("fill", line2);
   const link = svg.append("g").selectAll("line").data(links).join("line").attr("stroke", (d) => d.errors ? crit : line2).attr("stroke-width", (d) => 1 + Math.min(d.per_trace, 14) / 2.5).attr("marker-end", "url(#arrow)").attr("stroke-opacity", 0.9);
-  const elabel = svg.append("g").selectAll("text").data(links).join("text").attr("class", "edge-label").attr("text-anchor", "middle").text((d) => `${fmt(d.per_trace, 1)}/req · p95 ${fmt(d.p95_ms)} ms${d.errors ? ` · ${d.errors} err` : ""}`);
+  const elabel = svg.append("g").selectAll("text").data(links).join("text").attr("class", "edge-label").attr("text-anchor", "middle").text((d) => `${fmt(d.per_trace, 1)}/req${d.errors ? ` · ${d.errors} err` : ""}`);
   const node = svg.append("g").selectAll("g").data(nodes).join("g").call(d3.drag().on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }).on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; }).on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
   node.append("rect").attr("x", -46).attr("y", -16).attr("width", 92).attr("height", 32).attr("rx", 4).attr("fill", panel).attr("stroke", (d) => d.share >= 10 ? ember : d.store ? store : line2).attr("stroke-width", (d) => d.share >= 30 ? 2.5 : 1.5);
   node.append("rect").attr("x", -46).attr("y", 12).attr("height", 4).attr("rx", 2).attr("width", (d) => Math.min(92, 92 * d.share / 100)).attr("fill", ember);
