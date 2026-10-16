@@ -5,164 +5,287 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Faultline</title>
 <meta name="description" content="Faultline reads a system's traces into FalkorDB, finds who owns the latency and what breaks, and runs graph-predicted experiments and verified fixes behind human approval.">
+<meta name="color-scheme" content="dark light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="styles.css">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2310151c'/%3E%3Cpath d='M6 22 L13 10 L18 18 L22 13 L26 22' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151c'/%3E%3Cpath d='M6 21 L12.5 11 L17.5 18 L21.5 13 L26 21' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 </head>
-<body>
-<header class="top">
-  <div class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M6 22 L13 10 L18 18 L22 13 L26 22" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg>
-    <div>
-      <h1>Faultline</h1>
-      <p class="tag">The graph decides what to break and what to fix. A person approves. The system is changed and measured again.</p>
+<body class="loading">
+<a class="skip" href="#main">Skip to content</a>
+<svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-findings" viewBox="0 0 20 20"><path d="M4 17.5V3.5h9.5l-1.6 3.25 1.6 3.25H4"/></symbol>
+  <symbol id="i-trace" viewBox="0 0 20 20"><path d="M3 5h7M6 10h8M9.5 15h7.5"/></symbol>
+  <symbol id="i-experiments" viewBox="0 0 20 20"><path d="M7.5 2.75h5M8.25 2.75v5.1L3.9 15.2A1.4 1.4 0 0 0 5.1 17.25h9.8a1.4 1.4 0 0 0 1.2-2.05l-4.35-7.35v-5.1M6 12.5h8"/></symbol>
+  <symbol id="i-agent" viewBox="0 0 20 20"><path d="M3.5 4.25h13v9h-7.25L5.5 16.5v-3.25h-2z"/><path d="M7 8.75h.01M10 8.75h.01M13 8.75h.01" stroke-width="2.2"/></symbol>
+  <symbol id="i-approvals" viewBox="0 0 20 20"><path d="M10 2.5l6 2.4v4.6c0 4-2.7 6.6-6 7.6-3.3-1-6-3.6-6-7.6V4.9z"/><path d="M7.4 9.9l1.9 1.9 3.4-3.6"/></symbol>
+  <symbol id="i-graph" viewBox="0 0 20 20"><circle cx="5" cy="5.5" r="2"/><circle cx="15" cy="7" r="2"/><circle cx="8.5" cy="15" r="2"/><path d="M6.9 5.8l6.1.9M5.8 7.4l1.9 5.7M13.6 8.5l-3.7 5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4.2l2.8 1.8"/></symbol>
+  <symbol id="i-db" viewBox="0 0 20 20"><ellipse cx="10" cy="5" rx="6" ry="2.25"/><path d="M4 5v10c0 1.25 2.7 2.25 6 2.25s6-1 6-2.25V5M4 10c0 1.25 2.7 2.25 6 2.25s6-1 6-2.25"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 20 20"><path d="M10 2.5l1.6 4.4 4.4 1.6-4.4 1.6L10 14.5l-1.6-4.4L4 8.5l4.4-1.6z"/><path d="M15.5 13.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 20 20"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></symbol>
+  <symbol id="i-theme" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9v4.5M10 6.6h.01" stroke-width="1.9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 20 20"><path d="M6.5 4.5l9 5.5-9 5.5z"/></symbol>
+</svg>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 21 L12 10.5 L17.5 18 L21.5 13 L27 21" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="brand-text"><h1>Faultline</h1><span>Reliability console</span></div>
     </div>
-  </div>
-  <div class="controls">
-    <label class="field"><span>Window</span><select id="window"></select></label>
-    <span class="chip" id="meta-graph" title="FalkorDB graph"></span>
-    <span class="chip" id="meta-model" title="model"></span>
-    <span class="chip warn" id="meta-public" hidden>read-only demo</span>
-    <button class="icon-btn" id="theme" type="button" aria-label="Switch theme" title="Switch theme">◐</button>
-  </div>
-</header>
+    <nav class="nav" aria-label="Sections">
+      <a href="#findings" data-view="findings"><svg class="ico" aria-hidden="true"><use href="#i-findings"/></svg><span>Findings</span></a>
+      <a href="#trace" data-view="trace"><svg class="ico" aria-hidden="true"><use href="#i-trace"/></svg><span>Trace</span></a>
+      <a href="#experiments" data-view="experiments"><svg class="ico" aria-hidden="true"><use href="#i-experiments"/></svg><span>Experiments</span></a>
+      <a href="#agent" data-view="agent"><svg class="ico" aria-hidden="true"><use href="#i-agent"/></svg><span>Agent</span></a>
+      <a href="#approvals" data-view="approvals"><svg class="ico" aria-hidden="true"><use href="#i-approvals"/></svg><span>Approvals</span><span class="count" id="pending-count" hidden></span></a>
+      <a href="#graph" data-view="graph"><svg class="ico" aria-hidden="true"><use href="#i-graph"/></svg><span>Graph</span></a>
+    </nav>
+    <div class="rail-foot">
+      <p class="loop"><span>Observe</span><span>Experiment</span><span>Fix</span><span>Verify</span></p>
+      <p>The graph decides what to break and what to fix. A person approves. The system is changed and measured again.</p>
+    </div>
+  </aside>
 
-<section class="strip" id="strip" aria-label="Steady state">
-  <div class="stat"><span class="lbl">Endpoint</span><span class="val" id="s-op">—</span><span class="sub" id="s-traces"></span></div>
-  <div class="stat"><span class="lbl">Median</span><span class="val num" id="s-p50">—</span><span class="sub">ms</span></div>
-  <div class="stat"><span class="lbl">p95</span><span class="val num" id="s-p95">—</span><span class="sub">ms</span></div>
-  <div class="stat"><span class="lbl">Failed</span><span class="val num" id="s-failed">—</span><span class="sub" id="s-failrate"></span></div>
-  <div class="stat owner"><span class="lbl">Owns the latency</span><span class="val" id="s-owner">—</span><span class="sub" id="s-owner-share"></span></div>
-</section>
+  <div class="workspace">
+    <header class="top">
+      <div class="progress" aria-hidden="true"></div>
+      <div class="window-field">
+        <label for="window"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg><span>Window</span></label>
+        <select id="window"></select>
+      </div>
+      <div class="status">
+        <span class="chip" title="FalkorDB graph this console reads"><svg class="ico" aria-hidden="true"><use href="#i-db"/></svg><span class="k">graph</span><span id="meta-graph"></span></span>
+        <span class="chip" title="Model behind the Agent view"><svg class="ico" aria-hidden="true"><use href="#i-spark"/></svg><span class="k">model</span><span id="meta-model"></span></span>
+        <span class="chip warn" id="meta-public" title="Proposing and approving are turned off in this public demo" hidden><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Read-only demo</span>
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark theme" title="Switch theme"><svg class="ico" aria-hidden="true"><use href="#i-theme"/></svg></button>
+      </div>
+    </header>
 
-<div class="shell">
-  <nav class="rail" aria-label="Sections">
-    <a href="#findings" data-view="findings">Findings</a>
-    <a href="#trace" data-view="trace">Trace</a>
-    <a href="#experiments" data-view="experiments">Experiments</a>
-    <a href="#agent" data-view="agent">Agent</a>
-    <a href="#approvals" data-view="approvals">Approvals <span class="count" id="pending-count" hidden></span></a>
-    <a href="#graph" data-view="graph">Graph</a>
-  </nav>
-
-  <main id="main">
-    <section class="view" id="view-findings">
-      <div class="two">
-        <div class="panel graph-panel">
-          <div class="panel-head"><h2>Service graph</h2><span class="hint">edge width: calls per request · outline: share of critical-path latency · hover a hop for p50/p95</span></div>
-          <svg id="svc-graph" role="img" aria-label="Service dependency graph"></svg>
-          <div class="legend"><span><i class="sw ember"></i>owns latency</span><span><i class="sw err"></i>errors on hop</span><span><i class="sw store"></i>data store</span></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>Who owns the latency</h2><span class="hint">CRISP critical path, bottom-up, hangs excluded</span></div>
-          <table class="owners" id="owners"><thead><tr><th></th><th>Owner</th><th class="num">share</th><th class="num">ms / request</th><th>Code</th></tr></thead><tbody></tbody></table>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Findings</h2><span class="hint">each one is a Cypher query; the agent only reads them</span></div>
-        <ul class="findings" id="findings-list"></ul>
-      </div>
-      <div class="two">
-        <div class="panel">
-          <div class="panel-head"><h2>Attack surface</h2><span class="hint">data stores reachable from the edge; protocol as instrumented</span></div>
-          <table id="exposure"><thead><tr><th>Store</th><th>Path from edge</th><th>Protocols</th><th class="num">calls / request</th></tr></thead><tbody></tbody></table>
-          <p class="foot">TLS is not observable in these traces. Hops over http or grpc are reported as “no TLS attribute recorded”, nothing more.</p>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>Guardrails the graph recommends</h2><span class="hint">timeouts at 3 × p95; high priority where an experiment showed a hang</span></div>
-          <table id="guardrails"><thead><tr><th>Hop</th><th>Kind</th><th>Value</th><th>Evidence</th><th></th></tr></thead><tbody></tbody></table>
-          <table id="retries" class="mt"><thead><tr><th>Silent retries</th><th class="num">retried errors</th><th class="num">ms / request wasted</th><th class="num">on critical path</th></tr></thead><tbody></tbody></table>
-        </div>
-      </div>
+    <section class="kpis" id="strip" aria-label="Selected window at a glance">
+      <div class="kpi"><span class="lbl">Endpoint</span><span class="val" id="s-op">—</span><span class="sub" id="s-traces"></span></div>
+      <div class="kpi"><span class="lbl">Median · p50</span><span class="val num"><span id="s-p50">—</span><small>ms</small></span><span class="sub">middle request</span></div>
+      <div class="kpi"><span class="lbl">Tail · p95</span><span class="val num"><span id="s-p95">—</span><small>ms</small></span><span class="sub" id="s-tail">slowest 1 in 20</span></div>
+      <div class="kpi" id="k-failed"><span class="lbl">Failed</span><span class="val num" id="s-failrate">—</span><span class="sub" id="s-failed"></span></div>
+      <div class="kpi owner"><span class="lbl">Owns the latency</span><span class="val" id="s-owner">—</span><span class="meter" aria-hidden="true"><i id="s-owner-bar"></i></span><span class="sub" id="s-owner-share"></span></div>
     </section>
 
-    <section class="view" id="view-trace" hidden>
-      <div class="panel">
-        <div class="panel-head"><h2>Slowest steady-state request</h2><span class="hint" id="trace-meta"></span></div>
-        <div class="waterfall-wrap"><svg id="waterfall" role="img" aria-label="Trace waterfall"></svg></div>
-        <div class="legend"><span><i class="sw ember"></i>on the critical path</span><span><i class="sw slate"></i>off the critical path</span><span><i class="sw err"></i>error</span></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Critical chain</h2><span class="hint">top-down: the spans this request actually waited on</span></div>
-        <table id="chain"><thead><tr><th>Service</th><th>Operation</th><th>Waits on</th><th class="num">span ms</th><th class="num">self ms</th></tr></thead><tbody></tbody></table>
-      </div>
-    </section>
-
-    <section class="view" id="view-experiments" hidden>
-      <div class="two">
-        <div class="panel">
-          <div class="panel-head"><h2>What to break next</h2><span class="hint">Monocle-style: criticality × safety, recency and review gates; the ledger is the memory</span></div>
-          <table id="planner"><thead><tr><th>Target</th><th>Priority</th><th>Why</th><th></th></tr></thead><tbody></tbody></table>
+    <main id="main" tabindex="-1">
+      <!-- ============ Findings ============ -->
+      <section class="view" id="view-findings" aria-labelledby="t-findings">
+        <header class="view-head">
+          <h2 id="t-findings">Findings</h2>
+          <p>Where the selected window spends its time, what fails, and which guardrails the graph recommends.</p>
+        </header>
+        <div class="grid g-split">
+          <article class="panel graph-panel">
+            <div class="panel-head">
+              <div class="ttl"><h3>Service graph</h3><p class="sub">Calls between services in this window. Hover a hop for p50 and p95.</p></div>
+              <button class="info" type="button" aria-label="How to read the graph" data-tip="Edge width is calls per request. An orange outline and bar show the service's share of critical-path latency; pink edges carry errors; blue outlines are data stores. Drag a node to move it."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+            </div>
+            <div class="graph-scroll"><svg id="svc-graph" role="img" aria-label="Service dependency graph"></svg></div>
+            <div class="legend"><span><i class="sw ember"></i>owns latency</span><span><i class="sw err"></i>errors on hop</span><span><i class="sw store"></i>data store</span></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head">
+              <div class="ttl"><h3>Who owns the latency</h3><p class="sub">Each operation's share of end-to-end time on the critical path.</p></div>
+              <button class="info" type="button" aria-label="Method" data-tip="CRISP critical path, attributed bottom-up: a span owns the time the request spent waiting on it and nothing else. Hung requests are excluded so one timeout does not swamp the ranking."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+            </div>
+            <div class="table-wrap bleed">
+              <table class="owners" id="owners"><thead><tr><th class="num rank">#</th><th>Owner</th><th>Share</th><th class="num">ms / req</th></tr></thead>
+                <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
+            </div>
+          </article>
         </div>
-        <div class="panel">
-          <div class="panel-head"><h2>What to fix next</h2><span class="hint">the top owner mapped to the knob that targets it</span></div>
-          <div id="next-fix" class="nextfix"></div>
-          <div class="panel-head mt"><h2>Compare windows</h2></div>
-          <div class="row"><select id="cmp-a"></select><span class="arrow">→</span><select id="cmp-b"></select></div>
-          <table id="compare"><tbody></tbody></table>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Incidents</h2><span class="hint">windows that regressed against steady state; each can become an issue with the evidence</span></div>
-        <div id="incidents" class="ledger"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Experiments</h2><span class="hint">the graph's prediction against what happened</span></div>
-        <div id="experiments-list" class="ledger"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>Fixes</h2><span class="hint">four gates; a rejected fix is rolled back</span></div>
-        <div id="fixes" class="ledger"></div>
-      </div>
-    </section>
 
-    <section class="view" id="view-agent" hidden>
-      <div class="panel chat-panel">
-        <div class="panel-head"><h2>Agent</h2><span class="hint" id="agent-hint">Gemini chooses graph tools and proposes; every call is shown; it never executes</span></div>
-        <div id="chat" class="chat"></div>
-        <form id="ask" class="ask">
-          <div class="chips">
-            <button type="button" data-q="What is slow and why?">What is slow and why?</button>
-            <button type="button" data-q="What should we fix first? Use propose_fix to propose it.">What should we fix first?</button>
-            <button type="button" data-q="What would you break next to test resilience, and what did the last experiment teach us?">What would you break next?</button>
-            <button type="button" data-q="What went wrong in the last incident, where in the code is it, and should we file it?">What went wrong?</button>
-            <button type="button" data-q="Which data stores can be reached from the edge, and over what?">What is exposed?</button>
+        <article class="panel">
+          <div class="panel-head">
+            <div class="ttl"><h3>Findings</h3><p class="sub">Highest severity first. Each finding is a Cypher query over the graph; the agent reads them and cannot change them.</p></div>
+            <span class="head-meta" id="findings-count"></span>
           </div>
-          <div class="row"><input id="q" type="text" placeholder="Ask about this window" autocomplete="off"><button type="submit" class="btn primary">Ask</button><button type="button" class="btn" id="clear-chat">Clear</button></div>
-        </form>
-      </div>
-    </section>
+          <ul class="findings bleed" id="findings-list">
+            <li class="skel-row"><span class="skel"></span></li><li class="skel-row"><span class="skel"></span></li><li class="skel-row"><span class="skel"></span></li>
+          </ul>
+        </article>
 
-    <section class="view" id="view-approvals" hidden>
-      <div class="panel">
-        <div class="panel-head"><h2>Approvals</h2><span class="hint">nothing touches the running system without a click here; approval re-derives the evidence and refuses if it changed</span></div>
-        <div id="actions" class="ledger"></div>
-      </div>
-    </section>
+        <article class="panel">
+          <div class="panel-head">
+            <div class="ttl"><h3>Guardrails the graph recommends</h3><p class="sub">Timeouts and limits derived from measured latency on each hop.</p></div>
+            <button class="info" type="button" aria-label="How guardrails are chosen" data-tip="Timeouts are set at 3 × the hop's p95. A guardrail is high priority when an experiment showed that hop hangs instead of failing fast."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+          </div>
+          <div class="table-wrap bleed">
+            <table id="guardrails" class="stack"><thead><tr><th>Hop</th><th>Kind</th><th>Value</th><th>Evidence</th><th class="act"><span class="sr-only">Action</span></th></tr></thead><tbody></tbody></table>
+          </div>
+        </article>
 
-    <section class="view" id="view-graph" hidden>
-      <div class="two">
-        <div class="panel">
-          <div class="panel-head"><h2>Graph model</h2><span class="hint" id="model-counts"></span></div>
-          <svg id="schema" role="img" aria-label="Graph schema: node labels and relationship types"></svg>
-          <details><summary class="hint">Properties</summary><pre id="model" class="model"></pre></details>
+        <div class="grid g-split">
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Attack surface</h3><p class="sub">Data stores reachable from the edge, with the protocol recorded on each hop.</p></div></div>
+            <div class="table-wrap bleed">
+              <table id="exposure" class="stack"><thead><tr><th>Store</th><th>Path from edge</th><th>Protocols</th><th class="num">calls / req</th></tr></thead><tbody></tbody></table>
+            </div>
+            <p class="foot">TLS is not observable in these traces. Hops over http or grpc are reported as “no TLS attribute recorded”, nothing more.</p>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Silent retries</h3><p class="sub">Failed calls retried without surfacing an error.</p></div></div>
+            <div class="table-wrap bleed">
+              <table id="retries" class="wide"><thead><tr><th>Operation</th><th class="num">retried errors</th><th class="num">ms / req wasted</th><th class="num">on critical path</th></tr></thead><tbody></tbody></table>
+            </div>
+          </article>
         </div>
-        <div class="panel">
-          <div class="panel-head"><h2>Cypher</h2><span class="hint">read-only, 25 rows</span></div>
-          <select id="examples"></select>
-          <textarea id="cypher" rows="6" spellcheck="false"></textarea>
-          <div class="row"><button class="btn primary" id="run">Run</button><span class="hint" id="qstat"></span></div>
-          <div class="table-wrap"><table id="qresult"><thead></thead><tbody></tbody></table></div>
+      </section>
+
+      <!-- ============ Trace ============ -->
+      <section class="view" id="view-trace" aria-labelledby="t-trace" hidden>
+        <header class="view-head">
+          <h2 id="t-trace">Trace</h2>
+          <p>The slowest steady-state request in this window, span by span, with the chain it actually waited on.</p>
+        </header>
+        <article class="panel">
+          <div class="panel-head">
+            <div class="ttl"><h3>Slowest steady-state request</h3><p class="sub meta-row" id="trace-meta"><span class="skel short"></span></p></div>
+            <div class="legend"><span><i class="sw ember"></i>critical path</span><span><i class="sw self"></i>self time</span><span><i class="sw slate"></i>off the path</span><span><i class="sw err"></i>error</span></div>
+          </div>
+          <div class="waterfall-wrap bleed"><svg id="waterfall" role="img" aria-label="Trace waterfall"></svg></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div class="ttl"><h3>Critical chain</h3><p class="sub">Top-down: the spans this request waited on. Self time is the time spent in the span itself.</p></div></div>
+          <div class="table-wrap bleed">
+            <table id="chain" class="wide"><thead><tr><th>Service</th><th>Operation</th><th>Waits on</th><th class="num">span ms</th><th class="num">self ms</th></tr></thead>
+              <tbody><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr></tbody></table>
+          </div>
+        </article>
+      </section>
+
+      <!-- ============ Experiments ============ -->
+      <section class="view" id="view-experiments" aria-labelledby="t-experiments" hidden>
+        <header class="view-head">
+          <h2 id="t-experiments">Experiments</h2>
+          <p>What to break next, what to fix next, and the ledger of everything already tried. Proposals wait in Approvals.</p>
+        </header>
+
+        <div class="section-label"><h3>Next steps</h3></div>
+        <div class="grid g-split">
+          <article class="panel">
+            <div class="panel-head">
+              <div class="ttl"><h4>What to break next</h4><p class="sub">Targets ranked by criticality and safety. A target already tested ranks lower.</p></div>
+              <button class="info" type="button" aria-label="How targets are ranked" data-tip="Monocle-style planning: priority is criticality × safety, gated by recency and review. The experiment ledger is the planner's memory."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+            </div>
+            <div class="table-wrap bleed">
+              <table id="planner" class="stack"><thead><tr><th>Target</th><th>Priority</th><th>Why</th><th class="act"><span class="sr-only">Action</span></th></tr></thead>
+                <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h4>What to fix next</h4><p class="sub">The top latency owner, mapped to the configuration knob that targets it.</p></div></div>
+            <div id="next-fix" class="nextfix"><span class="skel"></span></div>
+          </article>
         </div>
-      </div>
-    </section>
-  </main>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div class="ttl"><h4>Compare windows</h4><p class="sub">Pick two windows to see what moved. Lower is better for every row.</p></div>
+            <div class="compare-pick">
+              <label class="sr-only" for="cmp-a">Before</label><select id="cmp-a"></select>
+              <span class="arrow" aria-hidden="true">→</span>
+              <label class="sr-only" for="cmp-b">After</label><select id="cmp-b"></select>
+            </div>
+          </div>
+          <div class="table-wrap bleed">
+            <table id="compare" class="compare"><thead><tr><th>Measure</th><th class="num">before</th><th class="num">after</th><th class="num">change</th></tr></thead><tbody></tbody></table>
+          </div>
+        </article>
+
+        <div class="section-label"><h3>Ledger</h3></div>
+        <article class="panel">
+          <div class="panel-head"><div class="ttl"><h4>Incidents</h4><p class="sub">Windows that regressed against steady state. Each can be filed as an issue with its evidence.</p></div><span class="head-meta" id="n-incidents"></span></div>
+          <div id="incidents" class="ledger"><span class="skel"></span></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div class="ttl"><h4>Experiments</h4><p class="sub">What the graph predicted next to what actually happened.</p></div><span class="head-meta" id="n-experiments"></span></div>
+          <div id="experiments-list" class="ledger"><span class="skel"></span></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div class="ttl"><h4>Fixes</h4><p class="sub">Every fix must pass four gates. A fix that fails one is rolled back.</p></div><span class="head-meta" id="n-fixes"></span></div>
+          <div id="fixes" class="ledger"><span class="skel"></span></div>
+        </article>
+      </section>
+
+      <!-- ============ Agent ============ -->
+      <section class="view" id="view-agent" aria-labelledby="t-agent" hidden>
+        <header class="view-head">
+          <h2 id="t-agent">Agent</h2>
+          <p id="agent-hint">Gemini chooses graph tools and proposes actions. Every tool call is shown, and it never executes anything.</p>
+        </header>
+        <div class="panel chat-panel">
+          <div id="chat" class="chat" role="log" aria-label="Conversation" aria-live="polite"></div>
+          <form id="ask" class="ask">
+            <div class="chips" role="group" aria-label="Suggested questions">
+              <button type="button" data-q="What is slow and why?">What is slow and why?</button>
+              <button type="button" data-q="What should we fix first? Use propose_fix to propose it.">What should we fix first?</button>
+              <button type="button" data-q="What would you break next to test resilience, and what did the last experiment teach us?">What would you break next?</button>
+              <button type="button" data-q="What went wrong in the last incident, where in the code is it, and should we file it?">What went wrong?</button>
+              <button type="button" data-q="Which data stores can be reached from the edge, and over what?">What is exposed?</button>
+            </div>
+            <div class="composer">
+              <label class="sr-only" for="q">Question</label>
+              <input id="q" type="text" placeholder="Ask about this window, for example: why is p95 above 400 ms?" autocomplete="off">
+              <button type="submit" class="btn primary">Ask</button>
+              <button type="button" class="btn ghost" id="clear-chat">Clear</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ============ Approvals ============ -->
+      <section class="view" id="view-approvals" aria-labelledby="t-approvals" hidden>
+        <header class="view-head">
+          <h2 id="t-approvals">Approvals</h2>
+          <p>Nothing touches the running system until someone approves it here. Approval re-derives the evidence and refuses if it changed.</p>
+        </header>
+        <div id="actions" class="approvals"><span class="skel"></span></div>
+      </section>
+
+      <!-- ============ Graph ============ -->
+      <section class="view" id="view-graph" aria-labelledby="t-graph" hidden>
+        <header class="view-head">
+          <h2 id="t-graph">Graph</h2>
+          <p>The FalkorDB property graph behind every number in this console. Query it directly; queries are read-only.</p>
+        </header>
+        <div class="grid g-split">
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Graph model</h3><p class="sub meta-row" id="model-counts"></p></div></div>
+            <div class="schema-scroll bleed"><svg id="schema" role="img" aria-label="Graph schema: node labels and relationship types"></svg></div>
+            <details class="disclosure"><summary>Node and relationship properties</summary><pre id="model" class="model"></pre></details>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Cypher</h3><p class="sub">Read-only. Returns up to 25 rows.</p></div></div>
+            <div class="field">
+              <label for="examples">Example query</label>
+              <select id="examples"></select>
+            </div>
+            <div class="field">
+              <label for="cypher">Query</label>
+              <textarea id="cypher" rows="8" spellcheck="false"></textarea>
+            </div>
+            <div class="toolbar">
+              <button class="btn primary" id="run" type="button"><svg class="ico" aria-hidden="true"><use href="#i-play"/></svg>Run</button>
+              <span class="kbd-hint"><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Enter</kbd></span>
+              <span class="qstat" id="qstat" role="status"></span>
+            </div>
+            <div class="result-wrap"><table id="qresult"><thead></thead><tbody></tbody></table></div>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
-<div id="tip" class="tip" hidden></div>
-<div id="toast" class="toast" hidden></div>
+<div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>
