@@ -454,15 +454,28 @@ function drawSchema(counts) {
   node.append("title").text((d) => `${d.id} {${d.sub}}`);
 }
 async function runQuery() {
+  const btn = $("#run"), label = $("#run-label"), stat = $("#qstat"), err = $("#qerror"), wrap = $(".result-wrap"), empty = $("#qempty");
+  btn.disabled = true; label.textContent = "Running…"; stat.textContent = "";
   const t0 = performance.now();
-  const r = await post("/api/query", { cypher: $("#cypher").value });
-  const ms = Math.round(performance.now() - t0);
-  $("#qstat").classList.toggle("err", !!r.error);
-  if (r.error) { $("#qstat").textContent = r.error; $("#qresult thead").innerHTML = ""; $("#qresult tbody").innerHTML = ""; return; }
-  $("#qstat").textContent = `${r.rows.length} row${r.rows.length === 1 ? "" : "s"}${r.rows.length >= 25 ? " (limit)" : ""} · ${ms} ms`;
-  $("#qresult thead").innerHTML = `<tr>${r.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>`;
-  $("#qresult tbody").innerHTML = r.rows.map((row) => `<tr>${row.map((v) => { const s = typeof v === "object" ? JSON.stringify(v) : v; return `<td title="${esc(s)}">${esc(s)}</td>`; }).join("")}</tr>`).join("")
-    || `<tr><td colspan="${Math.max(1, r.columns.length)}" class="hint">The query returned no rows.</td></tr>`;
+  let r;
+  try { r = await post("/api/query", { cypher: $("#cypher").value }); }
+  catch (e) { r = { error: e.message }; }
+  const ms = Math.max(1, Math.round(performance.now() - t0));
+  btn.disabled = false; label.textContent = "Run query";
+  if (r.error) {
+    err.textContent = r.error; err.hidden = false; wrap.hidden = true; empty.hidden = true;
+    $("#qresult thead").innerHTML = ""; $("#qresult tbody").innerHTML = ""; stat.textContent = "query failed";
+    $("#results-panel").scrollIntoView({ block: "nearest", behavior: "smooth" }); return;
+  }
+  err.hidden = true;
+  const isNum = (v) => typeof v === "number";
+  const numeric = r.columns.map((_, i) => r.rows.length > 0 && r.rows.every((row) => row[i] == null || isNum(row[i])));
+  $("#qresult thead").innerHTML = `<tr>${r.columns.map((c, i) => `<th class="${numeric[i] ? "num" : ""}">${esc(c)}</th>`).join("")}</tr>`;
+  $("#qresult tbody").innerHTML = r.rows.map((row) => `<tr>${row.map((v, i) => { const s = v == null ? "" : typeof v === "object" ? JSON.stringify(v) : isNum(v) ? (Number.isInteger(v) ? v.toLocaleString() : v.toFixed(2)) : v; return `<td class="${numeric[i] ? "num" : ""}" title="${esc(typeof v === "object" ? JSON.stringify(v) : v)}">${esc(s)}</td>`; }).join("")}</tr>`).join("");
+  const n = r.rows.length;
+  stat.textContent = `${n} row${n === 1 ? "" : "s"}${n >= 25 ? " (limit)" : ""} · ${ms} ms`;
+  wrap.hidden = n === 0; empty.hidden = n > 0; empty.textContent = n === 0 ? "The query ran and returned no rows." : "";
+  $("#results-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 async function loadGraphView() {
   const m = await api("/api/model"); $("#model").textContent = m.text;

@@ -188,6 +188,15 @@ def model():
     return {"text": block.strip("\n")}
 
 
+@app.middleware("http")
+async def no_stale_static(request, call_next):
+    """The console is one HTML file plus two assets; never let a browser keep an old app.js after a deploy."""
+    response = await call_next(request)
+    if request.url.path in ("/", "/index.html", "/app.js", "/styles.css"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/")
 def index():
     return FileResponse(WEB / "index.html")
