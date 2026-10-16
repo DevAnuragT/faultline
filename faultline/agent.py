@@ -192,8 +192,19 @@ class Agent:
         self.box = Toolbox(st)
         self.chat = None
         self.model = ""
+        self.provider = "offline"
+        self.live = False
+        try:
+            from . import claude_agent
+            if claude_agent.available():
+                self._claude = claude_agent.ClaudeChat(self.box, SYSTEM)
+                self.model, self.provider, self.live = self._claude.model, "claude", True
+                return
+        except Exception:  # SDK missing or misconfigured: fall through to Gemini
+            pass
         self.live = bool(config.GEMINI_API_KEY)
         if self.live:
+            self.provider = "gemini"
             from google import genai
             from google.genai import types
 
@@ -208,6 +219,11 @@ class Agent:
 
     def ask(self, message: str) -> tuple[str, list[dict]]:
         start = len(self.box.trace)
+        if self.provider == "claude":
+            try:
+                return self._claude.send(message), self.box.trace[start:]
+            except Exception as exc:
+                return f"(Claude unavailable: {exc.__class__.__name__}; answering from graph tools directly)\n\n" + self._offline(message), self.box.trace[start:]
         if self.live:
             last: Exception | None = None
             for _ in range(len(config.GEMINI_FALLBACK_MODELS) + 1):

@@ -84,6 +84,13 @@ path computed per trace and stored on spans, `percentileDisc` per window (steady
 recorded HotROD trace set, approval ledger (stale and tampered evidence refused, public mode cannot propose or execute,
 REFUTED-until-reviewed planner gate), and the HTTP API: overview, critical chain and waterfall, planner, offline agent, proposals, public-mode refusals, read-only Cypher.
 
+## The agent's model
+
+The agent runs on whichever provider has credentials, in this order: **Claude** (`ANTHROPIC_API_KEY`; model `claude-opus-5-5`,
+override with `CLAUDE_MODEL`), then **Gemini** (`GEMINI_API_KEY`, with a fallback chain), then an **offline** mode that
+answers from the same graph tools without a model. The tools, the proposals and the approval path are identical on all three;
+only the prose differs. Every tool call is recorded and shown.
+
 ## MCP
 
 `pip install -r requirements-mcp.txt`, then add to your client:

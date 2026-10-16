@@ -45,7 +45,7 @@ def record_agent(st: Store, prompts: list[tuple[str, set[str]]] | None = None, a
             if not ag.live:
                 raise RuntimeError("GEMINI_API_KEY needed to record")
             reply, trace = ag.ask(prompt)
-            if trace and not reply.startswith("(Gemini unavailable") and {t["tool"] for t in trace} & required:
+            if trace and not reply.startswith("(Gemini unavailable") and not reply.startswith("(Claude unavailable") and {t["tool"] for t in trace} & required:
                 break
             time.sleep(pause)
         else:

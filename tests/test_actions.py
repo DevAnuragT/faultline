@@ -86,3 +86,14 @@ def test_guardrail_proposal_writes_reviewable_yaml_on_approval(st, tmp_path, mon
     assert r["ok"] and r["written"].endswith("frontend_to_route.yaml")
     text = (tmp_path / r["written"]).read_text()
     assert "kind: VirtualService" in text and "timeout:" in text and "host: route" in text
+
+
+def test_agent_prefers_claude_when_a_key_is_present_and_degrades_to_graph_tools(st, monkeypatch):
+    from faultline.agent import Agent
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    ag = Agent(st)
+    assert ag.provider == "claude" and ag.model.startswith("claude-")
+    reply, trace = ag.ask("What is slow and why?")
+    if "APIConnectionError" in reply:
+        pytest.skip("no network")
+    assert reply.startswith("(Claude unavailable: AuthenticationError") and trace[0]["tool"] == "overview" and "mysql" in reply

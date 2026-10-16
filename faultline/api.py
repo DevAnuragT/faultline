@@ -34,7 +34,7 @@ def _w(window: str | None) -> str:
 
 @app.get("/api/meta")
 def meta():
-    return {"public": config.PUBLIC_MODE, "graph": config.GRAPH_NAME, "model": config.GEMINI_MODEL if config.GEMINI_API_KEY else "offline",
+    return {"public": config.PUBLIC_MODE, "graph": config.GRAPH_NAME, "model": Agent(st()).model or "offline",
             "edge": config.EDGE_SERVICES, "recorded": frozen.load_agent() is not None}
 
 
