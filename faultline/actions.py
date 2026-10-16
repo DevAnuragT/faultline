@@ -266,7 +266,7 @@ def _pr_payload(st: Store, subject: str) -> dict | None:
         return None
     kind, files = got
     return {"type": "pr", "subject": subject, "kind": kind, "repo": config.GITHUB_REPO or "local-dry-run", "base": config.GITHUB_BASE,
-            "branch": f"faultline/{subject}", "files": {path: _sha(text) for path, text in sorted(files.items())}}
+            "branch": f"fl/{subject}", "files": {path: _sha(text) for path, text in sorted(files.items())}}
 
 
 def propose_pr(st: Store, subject: str, rationale: str = "") -> dict:
