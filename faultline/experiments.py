@@ -100,8 +100,8 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
     try:
         observed_load = load.run(requests_n, parallel, progress=progress)
     finally:
+        load_end_us = int(time.time() * 1_000_000)  # every request has been sent and has given up by now
         _compose("unpause", service)
-        unpaused_us = int(time.time() * 1_000_000)
         progress(f"unpaused {service}")
     time.sleep(4)  # let the SDK flush spans to Jaeger
     w = ingest.ingest_window(st, f"pause-{service}", start_us=start_us, progress=progress)["window"]
@@ -129,7 +129,7 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
         parts.append({"part": f"{svc} is starved", "ok": ok, "detail": f"{a['calls_per_trace']:.1f} calls/request (baseline {b.get('calls_per_trace', 0):.1f})"})
     backlog = []
     for svc in hyp.get("frozen_with", []) + hyp["starved"]:
-        _, late = st.ro("MATCH (s:Span {window:$w, service:$s}) WHERE s.start_us > $t RETURN count(s)", {"w": w, "s": svc, "t": unpaused_us})
+        _, late = st.ro("MATCH (s:Span {window:$w, service:$s}) WHERE s.start_us > $t RETURN count(s)", {"w": w, "s": svc, "t": load_end_us})
         if late and late[0][0]:
             backlog.append(f"{late[0][0]} calls into {svc} ran after {service} resumed")
     confirmed = all(p["ok"] for p in parts)
@@ -139,7 +139,7 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
               f"{hung[0]['baseline_p50_ms']:.0f} ms; a timeout or circuit breaker on the hop into {service} would turn a hang into an error"
               if hung else "affected operations failed fast")
     if backlog:
-        lesson += ". Backlog: " + "; ".join(backlog) + ": callers kept waiting instead of cancelling, so no load was shed and the work ran late"
+        lesson += ". Backlog: " + "; ".join(backlog) + " after every caller had already given up: no deadline reached the callee, so the work ran late for nobody"
     if not confirmed:
         lesson = "prediction refuted: " + "; ".join(f"{p['part']} ({p['detail']})" for p in parts if not p["ok"]) + ". " + lesson
     result = {"id": exp_id, "kind": "pause", "target": service, "hypothesis": hyp["text"], "baseline": baseline, "observed": w,

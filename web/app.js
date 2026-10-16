@@ -877,7 +877,7 @@ async function loadNextSteps() {
   if (g) steps.push({ type: "guardrail", subject: g.hop, tone: "wait", title: `Add a ${g.value} timeout on ${g.hop}`, why: g.evidence, body: { type: "guardrail", hop: g.hop }, verb: "Propose guardrail" });
   const x = p.experiments.find((r) => !r.skip && r.target !== "frontend" && !r.history && r.priority > 0);
   if (x) steps.push({ type: "experiment", subject: x.target, tone: "muted", title: `Test what happens when ${x.target} stops`,
-    why: `Nothing has tested it yet. ${x.reasons.join(", ")}.`, body: { type: "experiment", target: x.target }, verb: "Propose pause" });
+    why: `Nothing has tested it yet. ${cap(x.reasons.join(", "))}.`, body: { type: "experiment", target: x.target }, verb: "Propose pause" });
   steps.splice(4);
   if (!steps.length && state.overview.owners[0]) {
     const o = state.overview.owners[0];
