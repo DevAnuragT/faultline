@@ -74,7 +74,7 @@ async function loadOverview() {
   $("#s-failed").textContent = h.traces ? `${h.failed} / ${h.traces}` : "—"; $("#s-failrate").textContent = h.traces ? pct(h.fail_rate) : "";
   $("#s-owner").textContent = top ? label(top) : "—"; $("#s-owner-share").textContent = top ? `${top.share_pct}% · ${fmt(top.per_request_ms)} ms per request` : "";
   const max = top ? top.share_pct : 1;
-  $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x) => `<tr><td title="${esc(label(x))}"><span class="bar" style="width:${Math.max(2, 90 * x.share_pct / max)}px"></span>${esc(label(x))}</td><td class="num">${x.share_pct}%</td><td class="num">${fmt(x.per_request_ms)}</td></tr>`).join("");
+  $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x) => `<tr><td class="barcell"><span class="bar" style="width:${Math.max(2, 72 * x.share_pct / max)}px"></span></td><td>${esc(label(x))}</td><td class="num">${x.share_pct}%</td><td class="num">${fmt(x.per_request_ms)}</td></tr>`).join("");
   $("#findings-list").innerHTML = o.findings.map((f) => `<li class="${f.severity}"><span class="stripe"></span><span class="kind">${esc(f.kind.replace(/_/g, " "))}</span><span class="text">${esc(f.detail)}</span></li>`).join("") || `<li class="empty">No findings in this window.</li>`;
   $("#exposure tbody").innerHTML = o.exposure.map((e) => `<tr><td><b>${esc(e.store)}</b> <span class="hint">${esc(e.store_kind)}</span></td><td class="mono">${esc(e.path)}</td><td class="mono">${e.protocols.map((p) => esc(p || "?")).join(" / ")}</td><td class="num">${e.calls_per_request_into_store}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">No data store reached from the edge in this window.</td></tr>`;
   $("#guardrails tbody").innerHTML = o.guardrails.map((g) => `<tr><td class="mono">${esc(g.hop)}</td><td>${esc(g.kind)}</td><td class="mono">${esc(g.value)}</td><td>${esc(g.evidence)}</td><td>${g.priority === "high" && g.kind === "timeout" ? `<button class="btn small" data-propose-guardrail="${esc(g.hop)}" ${state.meta.public ? "disabled" : ""}>Propose</button>` : ""}</td></tr>`).join("");
@@ -97,7 +97,7 @@ function drawGraph(o) {
   const ember = css("--ember"), slate = css("--slate"), crit = css("--crit"), store = css("--store"), panel = css("--panel"), line2 = css("--line-2");
   const sim = d3.forceSimulation(nodes).force("link", d3.forceLink(links).id((d) => d.id).distance(130)).force("charge", d3.forceManyBody().strength(-700))
     .force("center", d3.forceCenter(W / 2, H / 2)).force("x", d3.forceX((d) => d.edge ? W * 0.18 : d.store ? W * 0.82 : W / 2).strength(0.25)).force("y", d3.forceY(H / 2).strength(0.05));
-  svg.append("defs").append("marker").attr("id", "arrow").attr("viewBox", "0 -4 8 8").attr("refX", 22).attr("markerWidth", 7).attr("markerHeight", 7).attr("orient", "auto")
+  svg.append("defs").append("marker").attr("id", "arrow").attr("viewBox", "0 -4 8 8").attr("refX", 50).attr("markerWidth", 9).attr("markerHeight", 9).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
     .append("path").attr("d", "M0,-4L8,0L0,4").attr("fill", line2);
   const link = svg.append("g").selectAll("line").data(links).join("line").attr("stroke", (d) => d.errors ? crit : line2).attr("stroke-width", (d) => 1 + Math.min(d.per_trace, 14) / 2.5).attr("marker-end", "url(#arrow)").attr("stroke-opacity", 0.9);
   const elabel = svg.append("g").selectAll("text").data(links).join("text").attr("class", "edge-label").attr("text-anchor", "middle").text((d) => `${fmt(d.per_trace, 1)}/req · p95 ${fmt(d.p95_ms)} ms${d.errors ? ` · ${d.errors} err` : ""}`);
