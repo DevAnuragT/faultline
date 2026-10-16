@@ -173,6 +173,11 @@ verdict can be REFUTED. (3) A child span outliving its parent was credited beyon
 critical path now sum exactly to the root's duration. (4) Rollback now runs on errors too, and a rejected fix's window is
 flagged `steady:false` so it never becomes the steady state.
 
+Second experiment, pause `customer` (Oct 16, night): all four hypothesis parts held (`GET /dispatch` fails; driver, redis and
+route are starved), and the graph added a lesson nobody wrote: six MySQL calls ran after customer resumed, after every
+caller had already given up. No deadline reached the callee, so the work ran late for nobody. The timestamp of the last
+caller giving up is recorded in the experiment, and the window is flagged as an experiment, never steady state.
+
 Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
 `-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing
