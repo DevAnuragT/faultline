@@ -109,6 +109,7 @@ async function boot() {
   document.body.classList.remove("loading");
   show(location.hash.replace("#", "") || "findings");
   pollActions();
+  tourAuto();
 }
 
 /* ---------- overview ---------- */
@@ -347,7 +348,7 @@ function actionCard(a) {
   const status = job?.status === "running" ? "running" : a.status;
   return `<article class="card${a.status === "proposed" && !job ? " pending" : ""}"><div class="card-head">${statusPill(status)}<h4 class="card-title">${nice(a.title)}</h4>${ago(a.ts)}</div>
     <p class="card-text">${nice(a.rationale)}</p>
-    <div class="meta-line"><span class="tag">${esc(a.type || "action")}</span><span>${esc(a.id)}</span><span class="fp" title="Hash of the evidence this proposal was derived from. Approval re-derives it and refuses to run if it changed.">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span></div>
+    <div class="meta-line"><span class="tag">${esc(a.type || "action")}</span><span>${esc(a.id)}</span><span class="fp" tabindex="0" data-help="evidence-hash">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span></div>
     ${a.status === "proposed" && !job ? `<div class="actions"><button class="btn primary small" data-approve="${a.id}" ${lock()}>Approve and run</button><button class="btn small" data-reject="${a.id}" ${lock()}>Reject</button>${state.meta.public ? `<span class="locked"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Turned off in the read-only demo</span>` : ""}</div>` : ""}
     ${job?.log?.length ? `<div class="log-head">${job.status === "running" ? `<i class="live" aria-hidden="true"></i>Live log` : "Log"}</div><pre class="log" aria-live="polite">${esc(job.log.join("\n"))}</pre>` : ""}
     ${resultView(a.result || job?.result)}</article>`;
@@ -496,6 +497,208 @@ async function loadGraphView() {
   $("#cypher").onkeydown = (ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); runQuery(); } };
   runQuery();
 }
+
+/* ======================================================================
+   Help for newcomers: glossary tooltips, the Start here card and the tour.
+   All of the wording a first-time visitor reads lives in HELP and TOUR.
+   ====================================================================== */
+const HELP = {
+  "window": "A window is one batch of traces captured together, such as the baseline or the run right after a fix.",
+  "critical-path": "The critical path is the chain of calls a request actually waited on; speeding up anything off it does not make the request faster.",
+  "self-time": "Self time is the part of a span spent in that service itself, not waiting on the calls it made.",
+  "blast-radius": "Blast radius is the share of requests that would fail if this service stopped.",
+  "gate": "A gate is a pass-or-fail check on the new measurements; a fix is kept only if every gate passes.",
+  "evidence-hash": "The evidence hash fingerprints the data behind a proposal; if that data changes before approval, the run is refused.",
+  "read-graph": "Thicker edges carry more calls per request. Orange marks the services that own latency, pink edges carry errors, blue outlines are data stores.",
+  "owners-method": "Each operation is credited only with the time the request spent waiting on it (CRISP, bottom-up); hung requests are left out.",
+  "guardrails": "Timeouts are set at three times the hop's p95; a guardrail is high priority when an experiment showed that hop hangs.",
+  "planner": "Priority is criticality times safety, lowered for targets tested recently; the experiment ledger is the planner's memory.",
+};
+const TOUR = [
+  { view: "findings", target: [".window-field", "#strip"], atTop: true,
+    title: "Pick a window, read its vitals",
+    body: "A window is one batch of traces, such as the baseline or the run after a fix. These tiles are its vitals: typical and slowest latency, failures, and who owns the time." },
+  { view: "findings", target: ["#findings-list"], up: ".panel",
+    title: "What the graph found",
+    body: "Problems in this window, highest severity first. Every line is a Cypher query over the trace graph, so each one can be checked." },
+  { view: "trace", target: ["#waterfall"], up: ".panel", clip: 430,
+    title: "The slowest request, span by span",
+    body: "Each bar is one call, laid out in time. Orange bars are the critical path: the spans this request actually waited on." },
+  { view: "experiments", target: ["#planner"], up: ".grid",
+    title: "Break things on purpose, then fix them",
+    body: "What to break next and what to fix next, ranked by the graph. Further down is the ledger of every experiment and fix already tried." },
+  { view: "approvals", target: ["#actions > :first-child"],
+    title: "Nothing runs without a click here",
+    body: "Every proposal waits for a person. Approval is bound to the evidence hash: if the data changed since the proposal, the run is refused.",
+    publicBody: "On this public demo, proposing and approving are turned off. The ledger shows runs that were recorded earlier, with their evidence hashes." },
+  { view: "agent", target: ["#ask"],
+    title: "Ask in plain words",
+    body: "Pick a suggested question or type your own. The agent only reads the graph and proposes; every tool call it makes is listed." },
+  { view: "graph", target: ["#view-graph .g-split"], clip: 500,
+    title: "The data underneath",
+    body: "The schema of the trace graph and a read-only Cypher console. Choose an example query and run it to see the rows." },
+];
+
+/* storage can be missing or throw (private windows, blocked site data); the console works the same without it */
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+
+/* glossary tooltips: hover or focus shows, a tap pins, Esc or a click elsewhere closes */
+const help = (function () {
+  const box = $("#help"); let owner = null, pinned = false;
+  const place = (el) => {
+    box.style.left = "0px"; box.style.top = "0px"; box.hidden = false;
+    const r = el.getBoundingClientRect(), w = box.offsetWidth, h = box.offsetHeight, vw = document.documentElement.clientWidth;
+    const x = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), vw - w - 8);
+    let y = r.bottom + 8; if (y + h > innerHeight - 8) y = r.top - h - 8;
+    box.style.left = `${x}px`; box.style.top = `${Math.max(8, y)}px`;
+  };
+  const open = (el) => { const t = HELP[el.dataset.help]; if (!t) return; if (owner && owner !== el) owner.removeAttribute("aria-describedby"); owner = el; box.textContent = t; el.setAttribute("aria-describedby", "help"); place(el); };
+  const close = () => { if (owner) owner.removeAttribute("aria-describedby"); owner = null; pinned = false; box.hidden = true; };
+  document.addEventListener("mouseover", (e) => { const el = e.target.closest?.("[data-help]"); if (el && el !== owner) { pinned = false; open(el); } });
+  document.addEventListener("mouseout", (e) => { const el = e.target.closest?.("[data-help]"); if (el && el === owner && !pinned && !el.contains(e.relatedTarget) && document.activeElement !== el) close(); });
+  document.addEventListener("focusin", (e) => { const el = e.target.closest?.("[data-help]"); if (el) open(el); });
+  document.addEventListener("focusout", (e) => { if (e.target.closest?.("[data-help]") === owner && !pinned) close(); });
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest?.("[data-help]");
+    if (el) { e.preventDefault(); if (owner === el && pinned) close(); else { open(el); pinned = true; } }
+    else if (owner) close();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && owner) close(); });
+  addEventListener("scroll", () => { if (owner) place(owner); }, { passive: true });
+  return { close };
+})();
+
+/* Start here card: shown until dismissed */
+(function starter() {
+  const card = $("#start-here");
+  if (store.get("fl-start") !== "dismissed") card.hidden = false;
+  $("#start-dismiss").addEventListener("click", () => { card.hidden = true; store.set("fl-start", "dismissed"); toast("Hidden. The ? button in the top bar replays the tour at any time."); });
+})();
+
+/* the tour: a spotlight on one part of the console per step, with a short card */
+const tour = { open: false, i: 0, root: null, spot: null, card: null, from: "findings", focus: null, raf: 0, key: "", seen: false };
+const currentView = () => ($$(".view").find((v) => !v.hidden)?.id || "view-findings").replace("view-", "");
+const docked = () => matchMedia("(max-width: 860px)").matches;
+function tourBuild() {
+  const root = document.createElement("div");
+  root.className = "tour"; root.hidden = true;
+  root.innerHTML = `<div class="tour-spot" aria-hidden="true"></div>
+    <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-body">
+      <div class="tour-progress" aria-hidden="true">${TOUR.map(() => "<i></i>").join("")}</div>
+      <p class="tour-count" id="tour-count"></p>
+      <h2 id="tour-title"></h2>
+      <p class="tour-body" id="tour-body"></p>
+      <div class="tour-actions">
+        <button type="button" class="btn ghost small" data-tour="skip">Skip tour</button>
+        <button type="button" class="btn small" data-tour="back">Back</button>
+        <button type="button" class="btn primary small" data-tour="next">Next</button>
+      </div>
+    </div>`;
+  document.body.appendChild(root);
+  root.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tour]"); if (!b) return;
+    const act = b.dataset.tour;
+    if (act === "skip") tourEnd(); else if (act === "back") tourGo(tour.i - 1); else if (tour.i === TOUR.length - 1) tourEnd(); else tourGo(tour.i + 1);
+  });
+  Object.assign(tour, { root, spot: root.querySelector(".tour-spot"), card: root.querySelector(".tour-card") });
+}
+function tourStart(at = 0) {
+  if (!tour.root) tourBuild();
+  help.close();
+  if (!tour.open) { tour.from = currentView(); tour.focus = document.activeElement; }
+  tour.open = true; tour.root.hidden = false; document.body.classList.add("touring");
+  /* views load asynchronously; without this the browser's scroll anchoring drags the page away from the spotlight */
+  document.documentElement.style.overflowAnchor = "none";
+  document.addEventListener("keydown", tourKeys, true);
+  tourGo(at);
+  cancelAnimationFrame(tour.raf); tour.raf = requestAnimationFrame(tourLoop);
+}
+function tourGo(i) {
+  if (i < 0 || i >= TOUR.length) return;
+  tour.i = i; const s = TOUR[i];
+  if (currentView() !== s.view) { history.replaceState(null, "", `#${s.view}`); show(s.view); }
+  $("#tour-count").textContent = `Step ${i + 1} of ${TOUR.length}`;
+  $("#tour-title").textContent = s.title;
+  $("#tour-body").textContent = state.meta.public && s.publicBody ? s.publicBody : s.body;
+  $$(".tour-progress i", tour.card).forEach((el, k) => el.classList.toggle("on", k <= i));
+  tour.card.querySelector('[data-tour="back"]').hidden = i === 0;
+  const next = tour.card.querySelector('[data-tour="next"]');
+  next.textContent = i === TOUR.length - 1 ? "Finish" : "Next";
+  tour.key = ""; tour.settle = performance.now() + 1600;
+  requestAnimationFrame(() => { tourScroll(s); next.focus({ preventScroll: true }); });
+}
+function tourEls(s) {
+  const els = s.target.map((q) => { const el = $(q); return el && s.up ? el.closest(s.up) || el : el; }).filter((el) => el && el.getClientRects().length);
+  return els.length ? els : [$(`#view-${s.view} .view-head`)].filter(Boolean);
+}
+function tourRect(s) {
+  const rs = tourEls(s).map((el) => el.getBoundingClientRect()), pad = 6;
+  if (!rs.length) return null;
+  const top = Math.min(...rs.map((r) => r.top)), left = Math.min(...rs.map((r) => r.left));
+  let bottom = Math.max(...rs.map((r) => r.bottom)); const right = Math.max(...rs.map((r) => r.right));
+  if (s.clip) bottom = Math.min(bottom, top + s.clip);
+  return { top: top - pad, left: left - pad, right: right + pad, bottom: bottom + pad };
+}
+function tourScroll(s, onlyIfMoved = false) {
+  const r = tourRect(s);
+  const want = s.atTop || !r ? 0 : Math.max(0, scrollY + r.top - (docked() ? 12 : $(".top").getBoundingClientRect().bottom + 16));
+  if (onlyIfMoved && Math.abs(want - scrollY) < 24) return;
+  window.scrollTo({ top: want, behavior: "instant" });
+}
+function tourLoop() {
+  if (!tour.open) return;
+  tour.raf = requestAnimationFrame(tourLoop);
+  const s = TOUR[tour.i], vw = document.documentElement.clientWidth, vh = innerHeight, m = 12, dock = docked();
+  /* while a step's view is still loading, keep its target in place even if the view scrolls itself */
+  if (performance.now() < tour.settle) tourScroll(s, true);
+  const card = tour.card, cw = card.offsetWidth, ch = card.offsetHeight;
+  const r = tourRect(s) || { top: vh / 2, left: vw / 2, right: vw / 2, bottom: vh / 2 };
+  /* keep the spotlight inside the visible area, and above the docked card on a phone */
+  const maxB = dock ? vh - ch - 2 * m : vh - 4;
+  const t = Math.max(4, Math.min(r.top, maxB)), b = Math.max(t, Math.min(maxB, r.bottom)), l = Math.max(4, r.left), rr = Math.max(l, Math.min(vw - 4, r.right));
+  let x = null, y = null;
+  if (!dock) {
+    const fitX = Math.min(Math.max(m, l), vw - cw - m);
+    if (b + m + ch <= vh - m) { x = fitX; y = b + m; }
+    else if (t - m - ch >= m) { x = fitX; y = t - m - ch; }
+    else if (rr + m + cw <= vw - m) { x = rr + m; y = Math.min(Math.max(m, t), vh - ch - m); }
+    else if (l - m - cw >= m) { x = l - m - cw; y = Math.min(Math.max(m, t), vh - ch - m); }
+    else { x = Math.max(m, Math.min(rr, vw) - cw - 2 * m); y = Math.max(m, Math.min(b, vh) - ch - 2 * m); }
+  }
+  const key = [t, l, rr, b, x, y, dock].map((v) => (typeof v === "number" ? Math.round(v) : v)).join();
+  if (key === tour.key) return;
+  tour.key = key;
+  Object.assign(tour.spot.style, { top: `${t}px`, left: `${l}px`, width: `${rr - l}px`, height: `${b - t}px` });
+  card.style.left = dock ? "" : `${x}px`; card.style.top = dock ? "" : `${y}px`;
+}
+function tourEnd(restore = true) {
+  if (!tour.open) return;
+  tour.open = false; tour.seen = true; cancelAnimationFrame(tour.raf);
+  tour.root.hidden = true; document.body.classList.remove("touring"); document.documentElement.style.overflowAnchor = "";
+  document.removeEventListener("keydown", tourKeys, true);
+  store.set("fl-tour", "done");
+  if (restore && currentView() !== tour.from) { history.replaceState(null, "", `#${tour.from}`); show(tour.from); }
+  window.scrollTo({ top: 0 });
+  const back = tour.focus && tour.focus !== document.body && document.contains(tour.focus) ? tour.focus : $("#tour-btn");
+  back.focus({ preventScroll: true });
+}
+function tourKeys(e) {
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); tourEnd(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); if (tour.i === TOUR.length - 1) tourEnd(); else tourGo(tour.i + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); tourGo(tour.i - 1); }
+  else if (e.key === "Tab") {
+    const f = $$("button", tour.card).filter((b) => !b.hidden && !b.disabled);
+    const k = f.indexOf(document.activeElement);
+    e.preventDefault(); f[(k + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+  }
+}
+function tourAuto() { if (!tour.seen && store.get("fl-tour") !== "done") tourStart(); }
+document.addEventListener("click", (e) => { if (e.target.closest?.("[data-tour-start]")) { e.preventDefault(); tourStart(); } });
+/* leaving through the browser's back button ends the tour instead of stranding it */
+window.addEventListener("hashchange", () => { if (tour.open && location.hash.replace("#", "") !== TOUR[tour.i].view) tourEnd(false); });
 
 boot().catch((e) => {
   document.body.classList.remove("loading");

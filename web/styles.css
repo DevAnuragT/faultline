@@ -30,6 +30,7 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.35);
   --skel: #1f2631;
   --skel-hi: #283140;
+  --scrim: rgba(3, 6, 10, 0.68);
 
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
   --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
@@ -59,7 +60,7 @@
     --ember: #c2531a; --good: #1a7a4e; --warn: #8a5d00; --crit: #c0236f; --store: #2361cf; --slate: #b6c0cc;
     --focus: #2457c5; --btn-bg: #121820; --btn-fg: #ffffff;
     --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 12px 32px rgba(16, 24, 40, 0.12);
-    --skel: #e9edf2; --skel-hi: #f4f6f9;
+    --skel: #e9edf2; --skel-hi: #f4f6f9; --scrim: rgba(15, 23, 36, 0.46);
     color-scheme: light;
   }
 }
@@ -69,7 +70,7 @@
   --ember: #c2531a; --good: #1a7a4e; --warn: #8a5d00; --crit: #c0236f; --store: #2361cf; --slate: #b6c0cc;
   --focus: #2457c5; --btn-bg: #121820; --btn-fg: #ffffff;
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 12px 32px rgba(16, 24, 40, 0.12);
-  --skel: #e9edf2; --skel-hi: #f4f6f9;
+  --skel: #e9edf2; --skel-hi: #f4f6f9; --scrim: rgba(15, 23, 36, 0.46);
   color-scheme: light;
 }
 
@@ -214,13 +215,15 @@ main:focus { outline: none; }
 .foot { font-size: var(--t-sm); color: var(--fg-3); }
 .bleed { margin-inline: calc(-1 * var(--pad)); }
 
-/* info tooltip: anchored to the panel head so it can never leave the panel */
+/* info buttons and glossary terms share one tooltip (#help), positioned by app.js */
 .info { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; margin: -2px -4px 0 0; padding: 0; border: 0; background: none; border-radius: 6px; color: var(--fg-3); cursor: help; }
-.info:hover, .info:focus-visible { color: var(--fg); background: var(--raised); }
-.info::after { content: attr(data-tip); display: none; position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: min(380px, 100%);
-  background: var(--raised); color: var(--fg-2); border: 1px solid var(--line-2); border-radius: var(--r-sm); box-shadow: var(--shadow);
-  padding: 10px 12px; font: 12.5px/1.5 var(--body); text-align: left; white-space: normal; cursor: default; }
-.info:hover::after, .info:focus-visible::after { display: block; }
+.info:hover, .info:focus-visible, .info[aria-describedby] { color: var(--fg); background: var(--raised); }
+dfn.term { font-style: normal; color: inherit; text-decoration: underline dotted; text-decoration-color: var(--fg-3); text-decoration-thickness: 1.5px; text-underline-offset: 3px; cursor: help; border-radius: 2px; }
+dfn.term:hover, dfn.term[aria-describedby] { color: var(--fg); text-decoration-color: currentColor; }
+.fp[data-help] { cursor: help; border-radius: 3px; }
+.fp[data-help]:hover b { text-decoration: underline dotted; text-underline-offset: 3px; }
+.help-tip { position: fixed; z-index: 50; max-width: min(300px, calc(100vw - 16px)); background: var(--raised); color: var(--fg); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  box-shadow: var(--shadow); padding: 9px 12px; font: 12.5px/1.5 var(--body); pointer-events: none; text-wrap: pretty; }
 
 .legend { display: flex; gap: 6px 14px; font-size: var(--t-sm); color: var(--fg-3); flex-wrap: wrap; align-items: center; }
 .legend span { display: inline-flex; align-items: center; white-space: nowrap; }
@@ -516,6 +519,7 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2);
   .window-field select { flex: 1; }
   .status { margin-left: 0; justify-content: flex-start; width: 100%; }
   .status .icon-btn { margin-left: auto; }
+  .status .icon-btn + .icon-btn { margin-left: 0; }
   .chip .k { display: none; }
   .compare th.num, .compare td.num { width: auto; }
   .kpis { margin: 12px 16px 0; margin-left: max(16px, env(safe-area-inset-left, 0px)); margin-right: max(16px, env(safe-area-inset-right, 0px)); grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -581,3 +585,52 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line-2);
 body.loading .graph-scroll::after { content: "Loading the service graph"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-3); font-size: var(--t-sm); }
 
 #view-graph .g-split > .panel { align-self: start; }
+
+.window-field .info { margin: 0 0 0 -4px; }
+
+/* ---------- Start here ---------- */
+.starter { position: relative; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 3.2fr); gap: 16px 28px; align-items: center; padding: 18px var(--pad);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r); }
+.starter-intro { display: grid; gap: 6px; justify-items: start; }
+.starter-intro h3 { font-family: var(--display); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.starter-intro p { color: var(--fg-2); font-size: 13px; max-width: 34ch; }
+.starter-intro .btn { margin-top: 6px; }
+.recipe { list-style: none; margin: 0; padding: 0 30px 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.recipe li { position: relative; min-width: 0; }
+.recipe li + li::before { content: "→"; position: absolute; left: -16px; top: 50%; transform: translateY(-50%); color: var(--fg-3); font-size: 13px; }
+.recipe a { display: grid; gap: 3px; align-content: start; height: 100%; padding: 12px 14px; border-radius: 6px; background: var(--raised); border: 1px solid var(--line); text-decoration: none; color: var(--fg);
+  transition: border-color 140ms ease, background-color 140ms ease; }
+.recipe a:hover { border-color: var(--fg-3); }
+.recipe .n { font: 500 11px var(--mono); color: var(--fg-3); letter-spacing: 0.04em; }
+.recipe b { font-size: 13.5px; }
+.recipe a > span:last-child { font-size: 12.5px; color: var(--fg-2); line-height: 1.45; }
+.starter-close { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; background: transparent; border-color: transparent; }
+.starter-close:hover { background: var(--raised); }
+
+/* ---------- tour ---------- */
+.tour { position: fixed; inset: 0; z-index: 60; }
+body.touring * { overflow-anchor: none; }
+.tour-spot { position: fixed; border-radius: 10px; pointer-events: none; box-shadow: 0 0 0 2px var(--fg), 0 0 0 9999px var(--scrim);
+  transition: top 180ms ease, left 180ms ease, width 180ms ease, height 180ms ease; }
+.tour-card { position: fixed; width: min(380px, calc(100vw - 24px)); display: grid; gap: 8px; padding: 16px 18px 14px; background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line-2); border-radius: 12px; box-shadow: var(--shadow); transition: top 180ms ease, left 180ms ease; }
+.tour-progress { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; margin-bottom: 4px; }
+.tour-progress i { height: 3px; border-radius: 2px; background: var(--line-2); transition: background-color 160ms ease; }
+.tour-progress i.on { background: var(--fg); }
+.tour-count { font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-3); }
+.tour-card h2 { font-family: var(--display); font-size: 18px; line-height: 1.25; letter-spacing: -0.01em; }
+.tour-body { color: var(--fg-2); font-size: 13.5px; line-height: 1.55; }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.tour-actions [data-tour="skip"] { margin-right: auto; padding-left: 6px; padding-right: 6px; }
+@media (max-width: 1180px) {
+  .starter { grid-template-columns: minmax(0, 1fr); }
+  .recipe { padding-right: 0; }
+  .starter-intro { padding-right: 32px; }
+}
+@media (max-width: 860px) {
+  .recipe { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .recipe li + li::before { display: none; }
+  .recipe a { padding: 10px 12px; }
+  body.touring main { padding-bottom: 70vh; }
+  .tour-card { left: 12px; right: 12px; top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55vh; overflow-y: auto; }
+}

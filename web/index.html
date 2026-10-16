@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="styles.css?v=996a190e">
+<link rel="stylesheet" href="styles.css?v=tour1d">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151c'/%3E%3Cpath d='M6 21 L12.5 11 L17.5 18 L21.5 13 L26 21' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 </head>
@@ -29,6 +29,8 @@
   <symbol id="i-theme" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"/></symbol>
   <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 9v4.5M10 6.6h.01" stroke-width="1.9"/></symbol>
   <symbol id="i-play" viewBox="0 0 20 20"><path d="M6.5 4.5l9 5.5-9 5.5z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M7.9 7.9a2.15 2.15 0 0 1 4.15.75c0 1.45-2.05 1.9-2.05 3.1M10 14.2h.01" stroke-width="1.8"/></symbol>
+  <symbol id="i-close" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></symbol>
 </svg>
 
 <div class="app">
@@ -57,11 +59,13 @@
       <div class="window-field">
         <label for="window"><svg class="ico" aria-hidden="true"><use href="#i-clock"/></svg><span>Window</span></label>
         <select id="window"></select>
+        <button class="info" type="button" data-help="window" aria-label="What is a window?"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
       </div>
       <div class="status">
         <span class="chip" title="FalkorDB graph this console reads"><svg class="ico" aria-hidden="true"><use href="#i-db"/></svg><span class="k">graph</span><span id="meta-graph"></span></span>
         <span class="chip" title="Model behind the Agent view"><svg class="ico" aria-hidden="true"><use href="#i-spark"/></svg><span class="k">model</span><span id="meta-model"></span></span>
         <span class="chip warn" id="meta-public" title="Proposing and approving are turned off in this public demo" hidden><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Read-only demo</span>
+        <button class="icon-btn" id="tour-btn" type="button" data-tour-start aria-label="Take the tour of this console" title="Take the tour"><svg class="ico" aria-hidden="true"><use href="#i-help"/></svg></button>
         <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark theme" title="Switch theme"><svg class="ico" aria-hidden="true"><use href="#i-theme"/></svg></button>
       </div>
     </header>
@@ -81,19 +85,33 @@
           <h2 id="t-findings">Findings</h2>
           <p>Where the selected window spends its time, what fails, and which guardrails the graph recommends.</p>
         </header>
+        <section class="starter" id="start-here" aria-labelledby="start-title" hidden>
+          <div class="starter-intro">
+            <h3 id="start-title">Start here</h3>
+            <p>Faultline works in one loop. Follow it once and the rest of the console falls into place.</p>
+            <button class="btn small" type="button" data-tour-start>Take the tour</button>
+          </div>
+          <ol class="recipe">
+            <li><a href="#trace"><span class="n">1</span><b>See what's slow</b><span>Findings and Trace name the operation that owns the latency.</span></a></li>
+            <li><a href="#experiments"><span class="n">2</span><b>Propose a change</b><span>A fix, a guardrail or an experiment, from Experiments or the Agent.</span></a></li>
+            <li><a href="#approvals"><span class="n">3</span><b>Approve it</b><span>Nothing runs until a person clicks Approve.</span></a></li>
+            <li><a href="#experiments"><span class="n">4</span><b>Watch it verify</b><span>The change is measured again and must pass every gate.</span></a></li>
+          </ol>
+          <button class="icon-btn starter-close" id="start-dismiss" type="button" aria-label="Dismiss the Start here card" title="Dismiss"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+        </section>
         <div class="grid g-split">
           <article class="panel graph-panel">
             <div class="panel-head">
               <div class="ttl"><h3>Service graph</h3><p class="sub">Calls between services in this window. Hover a hop for p50 and p95.</p></div>
-              <button class="info" type="button" aria-label="How to read the graph" data-tip="Edge width is calls per request. An orange outline and bar show the service's share of critical-path latency; pink edges carry errors; blue outlines are data stores. Drag a node to move it."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+              <button class="info" type="button" aria-label="How to read the graph" data-help="read-graph"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
             </div>
             <div class="graph-scroll"><svg id="svc-graph" role="img" aria-label="Service dependency graph"></svg></div>
             <div class="legend"><span><i class="sw ember"></i>owns latency</span><span><i class="sw err"></i>errors on hop</span><span><i class="sw store"></i>data store</span></div>
           </article>
           <article class="panel">
             <div class="panel-head">
-              <div class="ttl"><h3>Who owns the latency</h3><p class="sub">Each operation's share of end-to-end time on the critical path.</p></div>
-              <button class="info" type="button" aria-label="Method" data-tip="CRISP critical path, attributed bottom-up: a span owns the time the request spent waiting on it and nothing else. Hung requests are excluded so one timeout does not swamp the ranking."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+              <div class="ttl"><h3>Who owns the latency</h3><p class="sub">Each operation's share of end-to-end time on the <dfn class="term" tabindex="0" data-help="critical-path">critical path</dfn>.</p></div>
+              <button class="info" type="button" aria-label="How ownership is measured" data-help="owners-method"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
             </div>
             <div class="table-wrap bleed">
               <table class="owners" id="owners"><thead><tr><th class="num rank">#</th><th>Owner</th><th>Share</th><th class="num">ms / req</th></tr></thead>
@@ -115,7 +133,7 @@
         <article class="panel">
           <div class="panel-head">
             <div class="ttl"><h3>Guardrails the graph recommends</h3><p class="sub">Timeouts and limits derived from measured latency on each hop.</p></div>
-            <button class="info" type="button" aria-label="How guardrails are chosen" data-tip="Timeouts are set at 3 × the hop's p95. A guardrail is high priority when an experiment showed that hop hangs instead of failing fast."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+            <button class="info" type="button" aria-label="How guardrails are chosen" data-help="guardrails"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
           </div>
           <div class="table-wrap bleed">
             <table id="guardrails" class="stack"><thead><tr><th>Hop</th><th>Kind</th><th>Value</th><th>Evidence</th><th class="act"><span class="sr-only">Action</span></th></tr></thead><tbody></tbody></table>
@@ -148,7 +166,7 @@
         <article class="panel">
           <div class="panel-head">
             <div class="ttl"><h3>Slowest steady-state request</h3><p class="sub meta-row" id="trace-meta"><span class="skel short"></span></p></div>
-            <div class="legend"><span><i class="sw ember"></i>critical path</span><span><i class="sw self"></i>self time</span><span><i class="sw slate"></i>off the path</span><span><i class="sw err"></i>error</span></div>
+            <div class="legend"><span><i class="sw ember"></i><dfn class="term" tabindex="0" data-help="critical-path">critical path</dfn></span><span><i class="sw self"></i><dfn class="term" tabindex="0" data-help="self-time">self time</dfn></span><span><i class="sw slate"></i>off the path</span><span><i class="sw err"></i>error</span></div>
           </div>
           <div class="waterfall-wrap bleed"><svg id="waterfall" role="img" aria-label="Trace waterfall"></svg></div>
         </article>
@@ -172,8 +190,8 @@
         <div class="grid g-split">
           <article class="panel">
             <div class="panel-head">
-              <div class="ttl"><h4>What to break next</h4><p class="sub">Targets ranked by criticality and safety. A target already tested ranks lower.</p></div>
-              <button class="info" type="button" aria-label="How targets are ranked" data-tip="Monocle-style planning: priority is criticality × safety, gated by recency and review. The experiment ledger is the planner's memory."><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
+              <div class="ttl"><h4>What to break next</h4><p class="sub">Targets ranked by criticality, <dfn class="term" tabindex="0" data-help="blast-radius">blast radius</dfn> and safety. A target already tested ranks lower.</p></div>
+              <button class="info" type="button" aria-label="How targets are ranked" data-help="planner"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
             </div>
             <div class="table-wrap bleed">
               <table id="planner" class="stack"><thead><tr><th>Target</th><th>Priority</th><th>Why</th><th class="act"><span class="sr-only">Action</span></th></tr></thead>
@@ -188,7 +206,7 @@
 
         <article class="panel">
           <div class="panel-head">
-            <div class="ttl"><h4>Compare windows</h4><p class="sub">Pick two windows to see what moved. Lower is better for every row.</p></div>
+            <div class="ttl"><h4>Compare windows</h4><p class="sub">Pick two <dfn class="term" tabindex="0" data-help="window">windows</dfn> to see what moved. Lower is better for every row.</p></div>
             <div class="compare-pick">
               <label class="sr-only" for="cmp-a">Before</label><select id="cmp-a"></select>
               <span class="arrow" aria-hidden="true">→</span>
@@ -210,7 +228,7 @@
           <div id="experiments-list" class="ledger"><span class="skel"></span></div>
         </article>
         <article class="panel">
-          <div class="panel-head"><div class="ttl"><h4>Fixes</h4><p class="sub">Every fix must pass four gates. A fix that fails one is rolled back.</p></div><span class="head-meta" id="n-fixes"></span></div>
+          <div class="panel-head"><div class="ttl"><h4>Fixes</h4><p class="sub">Every fix must pass four <dfn class="term" tabindex="0" data-help="gate">gates</dfn>. A fix that fails one is rolled back.</p></div><span class="head-meta" id="n-fixes"></span></div>
           <div id="fixes" class="ledger"><span class="skel"></span></div>
         </article>
       </section>
@@ -245,7 +263,7 @@
       <section class="view" id="view-approvals" aria-labelledby="t-approvals" hidden>
         <header class="view-head">
           <h2 id="t-approvals">Approvals</h2>
-          <p>Nothing touches the running system until someone approves it here. Approval re-derives the evidence and refuses if it changed.</p>
+          <p>Nothing touches the running system until someone approves it here. Approval re-derives the <dfn class="term" tabindex="0" data-help="evidence-hash">evidence hash</dfn> and refuses if it changed.</p>
         </header>
         <div id="actions" class="approvals"><span class="skel"></span></div>
       </section>
@@ -289,7 +307,8 @@
   </div>
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>
+<div id="help" class="help-tip" role="tooltip" hidden></div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-<script src="app.js?v=996a190e"></script>
+<script src="app.js?v=tour1d"></script>
 </body>
 </html>

@@ -9,6 +9,10 @@ demo script: [docs/DEMO.md](docs/DEMO.md) · **Live site:** _coming before submi
 
 ## See it in 30 seconds
 
+![First-run tour](docs/img/site-tour.png)
+
+A first visit opens a seven-step tour; the ? button in the top bar replays it, and a Start here card gives the four-step recipe.
+
 ![Findings](docs/img/site-findings.png)
 
 The graph says who owns the latency, which hops fan out, what hangs instead of failing, and that nothing has redundancy. Each line is a Cypher query.
