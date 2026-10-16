@@ -33,3 +33,5 @@ PUBLIC_MODE = os.environ.get("FAULTLINE_PUBLIC", "").lower() in ("1", "true", "y
 EDGE_SERVICES = [s.strip() for s in os.environ.get("EDGE_SERVICES", ROOT_SERVICE).split(",") if s.strip()]
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")        # owner/repo: PRs and issues are opened there; empty = written under out/
 GITHUB_BASE = os.environ.get("GITHUB_BASE", "faultline")
+SLO_P95_MS = float(os.environ["SLO_P95_MS"]) if os.environ.get("SLO_P95_MS") else None
+SLO_FAIL_RATE = float(os.environ["SLO_FAIL_RATE"]) if os.environ.get("SLO_FAIL_RATE") else None

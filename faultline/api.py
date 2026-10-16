@@ -35,20 +35,40 @@ def _w(window: str | None) -> str:
 @app.get("/api/meta")
 def meta():
     return {"public": config.PUBLIC_MODE, "graph": config.GRAPH_NAME, "model": Agent(st()).model or "offline",
-            "edge": config.EDGE_SERVICES, "recorded": frozen.load_agent() is not None}
+            "edge": config.EDGE_SERVICES, "recorded": frozen.load_agent() is not None,
+            "slo": {"endpoint": f"GET /dispatch", "p95_ms": config.SLO_P95_MS, "fail_rate": config.SLO_FAIL_RATE} if (config.SLO_P95_MS or config.SLO_FAIL_RATE) else None}
 
 
 @app.get("/api/windows")
 def windows():
-    ws = ingest.windows(st())
-    return {"windows": ws, "steady": ingest.latest_window(st()) if ws else None}
+    s = st()
+    _, rows = s.ro("MATCH (w:Window) RETURN w.id, w.label, w.traces, w.created, w.start_us, w.end_us, coalesce(w.steady, true) ORDER BY w.created")
+    ws, last_steady = [], None
+    for wid, label, traces, created, start_us, end_us, steady in rows:
+        kind = "experiment" if label.startswith("pause-") else "steady" if steady else "rejected"
+        h = analysis.root_health(s, wid)
+        ws.append({"id": wid, "label": label, "traces": traces, "created": created, "start_us": start_us, "end_us": end_us, "kind": kind,
+                   "baseline": last_steady, "health": {k: h[0][k] for k in ("op", "p50_ms", "p95_ms", "fail_rate", "traces")} if h else None})
+        if kind == "steady":
+            last_steady = wid
+    return {"windows": ws, "steady": ingest.latest_window(s) if ws else None}
+
+
+@app.get("/api/status")
+def status(window: str | None = None):
+    return analysis.status(st(), _w(window))
+
+
+@app.get("/api/traces")
+def traces(window: str | None = None, order: str = "duration", errors: bool = False, limit: int = 20):
+    return {"window": _w(window), "traces": analysis.traces(st(), _w(window), order, errors, min(limit, 100))}
 
 
 @app.get("/api/overview")
 def overview(window: str | None = None):
     s, w = st(), _w(window)
     return {"window": w, "health": analysis.root_health(s, w), "owners": analysis.critical_owners(s, w),
-            "graph": analysis.service_graph(s, w), "findings": analysis.findings(s, w), "exposure": analysis.exposure(s, w),
+            "graph": analysis.service_graph(s, w), "findings": analysis.with_cypher(analysis.findings(s, w), w), "exposure": analysis.exposure(s, w),
             "retries": analysis.retries(s, w), "guardrails": planner.guardrails(s, w), "spof": analysis.single_points_of_failure(s, w)}
 
 
@@ -67,7 +87,8 @@ def trace(trace_id: str):
 @app.get("/api/planner")
 def plan(window: str | None = None):
     s, w = st(), _w(window)
-    return {"window": w, "experiments": planner.rank_experiments(s, w), "next_fix": planner.next_fix(s, w), "remedies": planner.remedies(s, w)}
+    return {"window": w, "experiments": planner.rank_experiments(s, w), "next_fix": planner.next_fix(s, w), "remedies": planner.remedies(s, w),
+            "actions": planner.actions(s, w)}
 
 
 @app.get("/api/ledger")

@@ -198,8 +198,9 @@ def incident(st: Store, window: str, baseline: str | None = None) -> dict | None
         moved = sorted(owners_w, key=lambda o: -(o["per_request_ms"] - owners_b.get(label(o), 0.0)))
         top = moved[0] if moved else None
         _, worst = st.ro("MATCH (t:Trace {window:$w, root:$op}) RETURN t.id, t.duration_ms, t.status ORDER BY t.duration_ms DESC LIMIT 1", {"w": window, "op": op})
-        _, wlabel = st.ro("MATCH (x:Window {id:$w}) RETURN x.label", {"w": window})
-        return {"window": window, "label": wlabel[0][0] if wlabel else "", "baseline": base, "endpoint": op, "service": w["service"],
+        _, wlabel = st.ro("MATCH (x:Window {id:$w}) MATCH (y:Window {id:$b}) RETURN x.label, x.start_us, x.end_us, y.label", {"w": window, "b": base})
+        meta = wlabel[0] if wlabel else ("", None, None, "")
+        return {"window": window, "label": meta[0], "started_us": meta[1], "ended_us": meta[2], "baseline": base, "baseline_label": meta[3], "endpoint": op, "service": w["service"],
                 "fail_rate": (b["fail_rate"], w["fail_rate"]), "p50_ms": (b["p50_ms"], w["p50_ms"]), "p95_ms": (b["p95_ms"], w["p95_ms"]),
                 "traces": w["traces"], "kind": "failures" if worse_fail else "latency",
                 "owner": {**top, "baseline_per_request_ms": owners_b.get(label(top), 0.0)} if top else None,
@@ -209,12 +210,19 @@ def incident(st: Store, window: str, baseline: str | None = None) -> dict | None
 
 
 def incidents(st: Store) -> list[dict]:
-    """Every window that reads as an incident against the current steady state, newest first."""
+    """Every window that reads as an incident against the steady window before it, newest first, with a suggested action."""
     from . import ingest
     out = []
     for w in reversed(ingest.windows(st)):
         inc = incident(st, w["id"])
         if inc:
+            hop = inc.get("hop") or ""
+            if " -> " in hop:
+                inc["suggested"] = {"type": "guardrail", "payload": {"type": "guardrail", "hop": hop}, "title": f"Add a timeout on {hop}",
+                                    "why": "the request waited on this hop; a timeout turns a hang into a fast failure"}
+            else:
+                inc["suggested"] = {"type": "issue", "payload": {"type": "issue", "window": inc["window"]}, "title": "File the incident with its evidence",
+                                    "why": "no single hop to guard; the write-up carries the owner, numbers and worst trace"}
             out.append(inc)
     return out
 
@@ -282,6 +290,67 @@ def serialized_fanout(st: Store, window: str, min_calls: float = 3.0) -> list[di
     return sorted(out, key=lambda r: -r["rounds"])
 
 
+FINDING_CYPHER = {
+    "critical_owner": """MATCH (t:Trace {window:$w}) WITH t.root AS root, percentileDisc(t.duration_ms, 0.5) AS med, collect(t) AS ts
+UNWIND ts AS t WITH t WHERE t.duration_ms <= 10 * med
+WITH collect(t) AS ts, sum(t.duration_ms) AS total UNWIND ts AS t
+MATCH (s:Span {critical:true})-[:OF]->(t)
+RETURN s.service, s.op, s.peer, round(100.0*sum(s.self_us)/1000/total, 1) AS share_pct ORDER BY share_pct DESC""",
+    "fan_out": "MATCH (a:Service)-[c:CALLS {window:$w}]->(b:Service) WHERE c.per_trace >= 3 RETURN a.name, b.name, c.per_trace, c.errors, c.p95_ms ORDER BY c.per_trace DESC",
+    "hang_not_fail": """MATCH (t:Trace {window:$w}) WITH t.root AS root, percentileDisc(t.duration_ms, 0.5) AS med, collect(t) AS ts
+UNWIND ts AS t WITH root, med, t WHERE t.duration_ms > 10 * med
+MATCH (s:Span {critical:true})-[:OF]->(t) WITH root, med, t, s ORDER BY s.self_us DESC
+RETURN root, med, t.id, t.duration_ms, t.status, collect({service:s.service, op:s.op, peer:s.peer})[0] AS worst ORDER BY t.duration_ms DESC""",
+    "silent_retry": """MATCH (c1:Span {window:$w, error:true})-[:CHILD_OF]->(p:Span)<-[:CHILD_OF]-(c2:Span)
+WHERE c1.op = c2.op AND c1.service = c2.service AND c2.start_us > c1.start_us
+RETURN c1.service, c1.op, count(DISTINCT c1) AS retried_errors, sum(c1.duration_us)/1000.0 AS wasted_ms""",
+    "exposure": """MATCH (edge:Service {name:'frontend'}) MATCH (store:Service)<-[c:CALLS {window:$w}]-() WHERE c.proto STARTS WITH 'db:'
+WITH DISTINCT edge, store MATCH p = (edge)-[:CALLS*1..6 {window:$w}]->(store)
+RETURN store.name, [n IN nodes(p) | n.name] AS path, [r IN relationships(p) | r.proto] AS protocols""",
+    "single_point_of_failure": """CALL algo.betweenness({nodeLabels:['Service'], relationshipTypes:['CALLS']}) YIELD node, score
+MATCH path = (r:Service)-[:CALLS* {window:$w}]->(node) WHERE NOT ()-[:CALLS {window:$w}]->(r)
+RETURN node.name, score, count(DISTINCT path) AS inbound_paths ORDER BY score DESC""",
+}
+
+
+def status(st: Store, window: str) -> dict:
+    """Health of a window against the steady window before it, with the same thresholds as incident()."""
+    rows = st.q("""MATCH (w:Window {id:$w}) OPTIONAL MATCH (b:Window) WHERE b.created < w.created AND NOT b.label STARTS WITH 'pause-'
+                   AND coalesce(b.steady, true) WITH w, b ORDER BY b.created DESC LIMIT 1 RETURN w.label, b.id, b.label""", {"w": window})
+    label, base, base_label = rows[0] if rows else ("", None, None)
+    health = {h["op"]: h for h in root_health(st, window)}
+    if not base or not health:
+        return {"window": window, "label": label, "status": "baseline", "baseline": None, "reasons": ["first window: nothing to compare against"], "deltas": None}
+    hb = {h["op"]: h for h in root_health(st, base)}
+    hw = {h["op"]: h for h in root_health(st, window, baseline_p50={op: h["p50_ms"] for op, h in hb.items()})}
+    op = next(iter(hw))
+    a, b = hw[op], hb.get(op, hw[op])
+    deltas = {"p50_pct": round(100.0 * (a["p50_ms"] - b["p50_ms"]) / max(b["p50_ms"], 1), 1), "p95_pct": round(100.0 * (a["p95_ms"] - b["p95_ms"]) / max(b["p95_ms"], 1), 1),
+              "fail_rate_pts": round(100.0 * (a["fail_rate"] - b["fail_rate"]), 1)}
+    reasons = []
+    if a["fail_rate"] > b["fail_rate"] + 0.05:
+        reasons.append(f"failure rate {b['fail_rate']:.0%} -> {a['fail_rate']:.0%}")
+    if a["p95_ms"] > 1.5 * b["p95_ms"]:
+        reasons.append(f"p95 {b['p95_ms']:.0f} -> {a['p95_ms']:.0f} ms")
+    st_ = "failing" if a["fail_rate"] >= 0.5 else "degraded" if reasons else "ok"
+    if not reasons:
+        reasons.append(f"within its baseline {base_label}" + (f"; p50 {b['p50_ms']:.0f} -> {a['p50_ms']:.0f} ms" if a["p50_ms"] < b["p50_ms"] else ""))
+    from . import config
+    slo = None
+    if config.SLO_P95_MS or config.SLO_FAIL_RATE:
+        slo = {"p95_ok": config.SLO_P95_MS is None or a["p95_ms"] <= config.SLO_P95_MS, "fail_ok": config.SLO_FAIL_RATE is None or a["fail_rate"] <= config.SLO_FAIL_RATE}
+    return {"window": window, "label": label, "status": st_, "baseline": base, "baseline_label": base_label, "endpoint": op, "reasons": reasons, "deltas": deltas, "slo": slo}
+
+
+def traces(st: Store, window: str, order: str = "duration", errors: bool = False, limit: int = 20) -> list[dict]:
+    """Root traces of a window: slowest first (default) or in time order, optionally only failed/erroring ones."""
+    order_by = "t.duration_ms DESC" if order == "duration" else "t.start_us"
+    _, rows = st.ro(f"""MATCH (t:Trace {{window:$w}}) WHERE NOT $errors OR t.errors > 0 OR NOT t.status STARTS WITH '2'
+                        RETURN t.id, t.root, t.duration_ms, t.status, t.errors, t.start_us ORDER BY {order_by} LIMIT $n""",
+                    {"w": window, "errors": errors, "n": int(limit)})
+    return [{"id": r[0], "root": r[1], "duration_ms": round(r[2], 1), "status": r[3], "errors": r[4], "start_us": r[5]} for r in rows]
+
+
 def findings(st: Store, window: str) -> list[dict]:
     out: list[dict] = []
     for o in critical_owners(st, window)[:3]:
@@ -331,6 +400,14 @@ def findings(st: Store, window: str) -> list[dict]:
                               f"{', '.join(transit)} (transit, betweenness > 0) and {', '.join(leaves)} (leaves); the graph predicts stopping "
                               f"any one of them fails {total}/{total} requests", "services": transit + leaves})
     return out
+
+
+def with_cypher(items: list[dict], window: str) -> list[dict]:
+    for f in items:
+        q = FINDING_CYPHER.get(f["kind"])
+        if q:
+            f["cypher"] = q; f["params"] = {"w": window}
+    return items
 
 
 def record_findings(st: Store, window: str, items: list[dict]) -> int:

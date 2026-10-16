@@ -53,3 +53,19 @@ def test_site_and_agent_and_actions(client, monkeypatch):
     assert client.post(f"/api/actions/{p['action']}/reject").json()["status"] == "rejected"
     q = client.post("/api/query", json={"cypher": "MATCH (s:Service) RETURN count(s)"}).json()
     assert q["rows"][0][0] >= 6 and "error" in client.post("/api/query", json={"cypher": "MATCH (n) DELETE n"}).json()
+
+
+def test_status_traces_windows_and_actions(client):
+    ws = client.get("/api/windows").json()["windows"]
+    assert ws[0]["kind"] == "steady" and ws[0]["health"]["op"] == "GET /dispatch" and ws[0]["baseline"] is None and ws[0]["start_us"]
+    stt = client.get("/api/status").json()
+    assert stt["status"] == "baseline" and stt["baseline"] is None
+    tr = client.get("/api/traces?order=duration&limit=3").json()["traces"]
+    assert len(tr) == 3 and tr[0]["duration_ms"] >= tr[1]["duration_ms"] and tr[0]["duration_ms"] > 10000
+    bad = client.get("/api/traces?errors=true").json()["traces"]
+    assert bad and all(t["errors"] > 0 or not str(t["status"]).startswith("2") for t in bad)
+    f = client.get("/api/overview").json()["findings"]
+    assert all("cypher" in x and x["params"]["w"] for x in f if x["kind"] in ("critical_owner", "fan_out", "hang_not_fail", "exposure"))
+    acts = client.get("/api/planner").json()["actions"]
+    assert acts and acts == sorted(acts, key=lambda a: a["priority"]) and all(a["title"] and a["why"] for a in acts)
+    assert any(a["type"] == "experiment" and a["payload"]["target"] in ("customer", "driver") for a in acts)

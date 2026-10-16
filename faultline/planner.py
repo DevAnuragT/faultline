@@ -151,3 +151,32 @@ def diff_windows(st: Store, a: str, b: str) -> dict:
     eb = {(e["from"], e["to"]) for e in analysis.service_graph(st, b)}
     return {"from": a, "to": b, "health": health, "owners": owners[:6],
             "edges_added": sorted(f"{x} -> {y}" for x, y in eb - ea), "edges_removed": sorted(f"{x} -> {y}" for x, y in ea - eb)}
+
+
+def actions(st: Store, window: str) -> list[dict]:
+    """The next actions the graph supports for this window, ranked, each as a ready proposal payload for /api/propose."""
+    out = []
+    nf = next_fix(st, window)
+    if nf:
+        out.append({"type": "fix", "priority": 1, "title": f"{nf['kind'].replace('_', ' ')}: {nf['targets_owner']} ({nf['share_pct']}%)",
+                    "why": nf["evidence"], "payload": {"type": "fix", "flags": " ".join(nf["flags"]), "rationale": nf["evidence"]}})
+    for g in guardrails(st, window):
+        if g["priority"] == "high" and g["kind"] == "timeout":
+            out.append({"type": "guardrail", "priority": 1, "title": f"Add a {g['value']} timeout on {g['hop']}", "why": g["evidence"],
+                        "payload": {"type": "guardrail", "hop": g["hop"], "rationale": g["evidence"]}})
+    for inc in analysis.incidents(st):
+        out.append({"type": "issue", "priority": 2, "title": f"File incident: {inc['endpoint']} in {inc['label']}",
+                    "why": f"{inc['fail_rate'][1]:.0%} failed, p95 {inc['p95_ms'][1]:.0f} ms against {inc['fail_rate'][0]:.0%} and {inc['p95_ms'][0]:.0f} ms",
+                    "payload": {"type": "issue", "window": inc["window"]}})
+        break
+    for r in rank_experiments(st, window):
+        if r["priority"] > 0 and not r["skip"]:
+            out.append({"type": "experiment", "priority": 3, "title": f"Test what happens when {r['target']} stops", "why": "; ".join(r["reasons"][:3]),
+                        "payload": {"type": "experiment", "target": r["target"]}})
+            break
+    for r in remedies(st, window):
+        if not r.get("actuator"):
+            out.append({"type": "advice", "priority": 4, "title": f"{r['kind'].replace('_', ' ')} in {r['service']} {r['op']} ({r['share_pct']}%)",
+                        "why": f"{r['evidence']}. {r['change']}. No actuator in this environment: a code change.", "payload": None})
+            break
+    return sorted(out, key=lambda a: a["priority"])
