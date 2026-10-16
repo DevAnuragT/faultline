@@ -11,7 +11,7 @@ import json
 import time
 import uuid
 
-from . import analysis, experiments, guard, ingest, planner
+from . import analysis, config, experiments, guard, ingest, planner
 from .graph import Store
 
 
@@ -39,7 +39,7 @@ def _fix_payload(st: Store, flags: list[str]) -> dict:
 
 def _store(st: Store, payload: dict, title: str, rationale: str) -> dict:
     guard.require_writable("proposing an action")  # visitors of the public site read the recorded ledger only
-    subject = payload["target"] if payload["type"] == "experiment" else " ".join(payload["flags"])
+    subject = {"experiment": payload.get("target"), "fix": " ".join(payload.get("flags", [])), "guardrail": payload.get("hop")}[payload["type"]]
     dup = st.q("MATCH (a:Action {type:$t, subject:$s, status:'proposed'}) RETURN a.id", {"t": payload["type"], "s": subject})
     if dup:
         return {"ok": True, "action": dup[0][0], "status": "proposed", "note": "already proposed; awaiting approval"}
@@ -47,6 +47,36 @@ def _store(st: Store, payload: dict, title: str, rationale: str) -> dict:
     st.q("CREATE (a:Action {id:$id, type:$t, subject:$s, status:'proposed', title:$title, rationale:$r, payload:$p, hash:$h, ts:$ts})",
          {"id": aid, "t": payload["type"], "s": subject, "title": title, "r": rationale, "p": canonical(payload), "h": payload_hash(payload), "ts": time.time()})
     return {"ok": True, "action": aid, "status": "proposed", "title": title, "hash": payload_hash(payload)[:12]}
+
+
+def _guardrail_payload(st: Store, hop: str) -> dict | None:
+    w = ingest.latest_window(st)
+    g = next((x for x in planner.guardrails(st, w) if x["hop"] == hop and x["kind"] == "timeout"), None)
+    if not g:
+        return None
+    return {"type": "guardrail", "hop": hop, "baseline": w, "timeout": g["value"], "evidence": g["evidence"], "priority": g["priority"]}
+
+
+def guardrail_yaml(payload: dict) -> str:
+    """The lesson as a concrete artifact: an Istio VirtualService timeout + bounded retries for the hop. Nothing here is
+    applied to HotROD (it has no mesh); approval writes the file so the finding leaves the graph as a reviewable change."""
+    src, dst = [x.strip() for x in payload["hop"].split("->")]
+    ms = int(payload["timeout"].split()[0])
+    return (f"# Faultline guardrail for {src} -> {dst}\n# evidence: {payload['evidence']}\n# window: {payload['baseline']}\n"
+            f"apiVersion: networking.istio.io/v1\nkind: VirtualService\nmetadata:\n  name: {dst}-from-{src}\nspec:\n  hosts:\n  - {dst}\n"
+            f"  http:\n  - timeout: {ms / 1000:.3f}s\n    retries:\n      attempts: 2\n      perTryTimeout: {ms / 2000:.3f}s\n"
+            f"      retryOn: 5xx,reset,connect-failure\n    route:\n    - destination:\n        host: {dst}\n")
+
+
+def propose_guardrail(st: Store, hop: str, rationale: str = "") -> dict:
+    """Propose a timeout/retry policy for one hop, e.g. 'frontend -> route'. Approval writes the YAML under out/."""
+    try:
+        p = _guardrail_payload(st, hop)
+        if not p:
+            return {"ok": False, "error": f"no measured hop {hop!r}; hops come from guardrails()"}
+        return _store(st, p, f"Add a {p['timeout']} timeout with bounded retries on {hop}", rationale or p["evidence"])
+    except guard.ReadOnlyError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def propose_experiment(st: Store, service: str, rationale: str = "") -> dict:
@@ -90,13 +120,20 @@ def approve(st: Store, action_id: str, progress=print) -> dict:
     if payload_hash(payload) != h:
         st.q("MATCH (a:Action {id:$id}) SET a.status = 'tampered'", {"id": action_id})
         return {"ok": False, "error": "stored payload does not match its hash"}
-    fresh = _experiment_payload(st, payload["target"]) if typ == "experiment" else _fix_payload(st, payload["flags"])
+    fresh = (_experiment_payload(st, payload["target"]) if typ == "experiment" else _fix_payload(st, payload["flags"]) if typ == "fix"
+             else _guardrail_payload(st, payload["hop"]))
     if payload_hash(fresh) != h:
         st.q("MATCH (a:Action {id:$id}) SET a.status = 'stale', a.stale_reason = $r", {"id": action_id, "r": canonical(fresh)})
         return {"ok": False, "error": "evidence changed since this was proposed (new window or different prediction); re-propose", "now": fresh}
     st.q("MATCH (a:Action {id:$id}) SET a.status = 'running'", {"id": action_id})
     try:
-        if typ == "experiment":
+        if typ == "guardrail":
+            out = config.ROOT / "out" / "guardrails"
+            out.mkdir(parents=True, exist_ok=True)
+            path = out / (payload["hop"].replace(" -> ", "_to_") + ".yaml")
+            path.write_text(guardrail_yaml(payload))
+            summary = {"written": str(path.relative_to(config.ROOT)), "timeout": payload["timeout"]}
+        elif typ == "experiment":
             r = experiments.run_pause(st, payload["baseline"], payload["target"], progress=progress)
             summary = {"id": r["id"], "verdict": r["verdict"], "lesson": r["lesson"], "observed": r["observed"]}
             st.q("MATCH (a:Action {id:$id}), (e:Experiment {id:$eid}) CREATE (a)-[:EXECUTED_AS]->(e)", {"id": action_id, "eid": r["id"]})

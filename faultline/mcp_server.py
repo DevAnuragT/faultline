@@ -94,6 +94,12 @@ def propose_fix(flags: str, rationale: str = "") -> dict:
 
 
 @mcp.tool()
+def propose_guardrail(hop: str, rationale: str = "") -> dict:
+    """Propose a timeout + bounded-retry policy for one hop (e.g. "frontend -> route"); a human approves."""
+    return box().propose_guardrail(hop, rationale)
+
+
+@mcp.tool()
 def query_graph(cypher: str) -> dict:
     """Read-only Cypher against the graph (max 25 rows)."""
     return box().query_graph(cypher)

@@ -150,6 +150,14 @@ raised to high priority when an experiment showed a hang), `retries`, `history` 
 (read-only). Proposals become Action nodes with a SHA-256 of their evidence; approval re-derives the evidence and
 refuses stale or tampered actions; execution is deterministic code; a REJECTED fix is rolled back automatically.
 
+Three kinds of proposal, all approved the same way: a **fault experiment** (pause a container; verdict CONFIRMED/REFUTED
+against the graph's prediction), a **fix** (a HotROD flag; four gates; rollback on REJECTED), and a **guardrail** (the
+lesson of a hang experiment as a reviewable Istio VirtualService timeout + bounded retries written under `out/`).
+The same graph also answers the security question the original idea asked: `attack_surface` lists every data store,
+the shortest call path from the edge into it, the protocol of each hop as instrumented (TLS is not observable in these
+traces and is reported as "no TLS attribute recorded", never as "plaintext"), and the calls per request into the store.
+An MCP server exposes all thirteen read/propose tools to other agents; execution stays behind approval.
+
 Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
 `-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing

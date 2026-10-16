@@ -22,7 +22,8 @@ Rules:
   a recommendation without a proposal is incomplete. Nothing runs until a human approves it in the Actions tab: say
   "proposed" (never "applied", "ran" or "started") and give the action id the tool returned. After a fix is VERIFIED,
   say what the graph names as the next owner.
-- When asked about resilience, timeouts, retries or chaos: use rank_experiments, guardrails, retries and history.
+- When asked about resilience, timeouts, retries or chaos: use rank_experiments, guardrails, retries and history. When
+  an experiment's lesson says a hop hangs, propose_guardrail for that hop (it is the fix for the hang).
 - When asked about security, exposure, attack surface or data stores: call attack_surface and report paths and hops;
   never claim a hop is encrypted or unencrypted, only that no TLS attribute was recorded.
 - history is your memory across sessions: check it before proposing something that was already tried.
@@ -141,6 +142,13 @@ class Toolbox:
         self._log("propose_fix", {"flags": flags}, res)
         return res
 
+    def propose_guardrail(self, hop: str, rationale: str = "") -> dict:
+        """Propose (not apply) a timeout + bounded-retry policy for one hop, e.g. "frontend -> route", sized from
+        guardrails(). Approval writes a reviewable Istio VirtualService YAML; the hop's experiment evidence is cited."""
+        res = actions.propose_guardrail(self.st, hop, rationale)
+        self._log("propose_guardrail", {"hop": hop}, res)
+        return res
+
     def query_graph(self, cypher: str) -> dict:
         """Run a READ-ONLY Cypher query (labels: Service, Operation, Window, Trace, Span, Finding, Experiment, Fix,
         Action; edges: EXPOSES, CALLS{window}, INVOKES{window}, IN, OF, CHILD_OF, ON, ABOUT, TARGETS, BASELINE,
@@ -175,7 +183,7 @@ class Toolbox:
 
     def _raw_tools(self) -> list:
         return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.next_fix, self.guardrails,
-                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.query_graph]
+                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.query_graph]
 
 
 class Agent:
@@ -241,6 +249,9 @@ class Agent:
             lines = [f"- {x['target']}: priority {x['priority']}" + (f" (skipped: {x['skip']})" if x["skip"] else f" ({'; '.join(x['reasons'])})") for x in r]
             if best:
                 p = self.box.propose_experiment(best["target"]); lines.append(f"Proposed pausing {best['target']}: action {p.get('action')}.")
+            hung = [x for x in g if x["priority"] == "high" and x["kind"] == "timeout"]
+            for x in hung[:1]:
+                p = self.box.propose_guardrail(x["hop"]); lines.append(f"An experiment showed {x['hop']} hangs: proposed a {x['value']} timeout with bounded retries, action {p.get('action')}.")
             lines += [f"- guardrail {x['hop']}: {x['kind']} {x['value']} ({x['evidence']})" for x in g[:4]]
             return "\n".join(lines)
         o = self.box.overview()

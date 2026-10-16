@@ -46,8 +46,11 @@ def test_ingest_and_analyse_recorded_traces(st):
     assert polluted[0]["service"] == "frontend" and owners[0]["service"] != "frontend", "hangs must not dominate steady-state owners"
     health = analysis.root_health(st, w)
     assert health[0]["op"] == "GET /dispatch" and health[0]["failed"] == 2 and health[0]["traces"] == 5
+    ex = {e["store"]: e for e in analysis.exposure(st, w)}
+    assert ex["mysql"]["path"] == "frontend -> customer -> mysql" and ex["mysql"]["protocols"] == ["http", "db:mysql"]
+    assert ex["redis-manual"]["calls_per_request_into_store"] > 5 and ex["redis-manual"]["protocols"][0] == "grpc"
     kinds = {f["kind"] for f in analysis.findings(st, w)}
-    assert {"critical_owner", "fan_out", "hang_not_fail", "single_point_of_failure"} <= kinds
+    assert {"critical_owner", "fan_out", "hang_not_fail", "single_point_of_failure", "exposure"} <= kinds
     assert sum(1 for f in analysis.findings(st, w) if f["kind"] == "hang_not_fail") == 1, "identical hangs are one finding"
     n = analysis.record_findings(st, w, analysis.findings(st, w))
     assert n >= len(kinds) and st.q("MATCH (f:Finding {window:$w})-[:ABOUT]->(:Service) RETURN count(f)", {"w": w})[0][0] == n

@@ -75,3 +75,14 @@ def test_refuted_experiment_blocks_target_until_reviewed(st):
     actions.review_experiment(st, "exp-x")
     r = next(x for x in planner.rank_experiments(st, w) if x["target"] == "driver")
     assert r["skip"] is None and "tested before" in r["reasons"][-1]
+
+
+def test_guardrail_proposal_writes_reviewable_yaml_on_approval(st, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    assert actions.propose_guardrail(st, "nowhere -> nothing")["ok"] is False
+    p = actions.propose_guardrail(st, "frontend -> route")
+    assert p["ok"] and "timeout" in p["title"]
+    r = actions.approve(st, p["action"])
+    assert r["ok"] and r["written"].endswith("frontend_to_route.yaml")
+    text = (tmp_path / r["written"]).read_text()
+    assert "kind: VirtualService" in text and "timeout:" in text and "host: route" in text

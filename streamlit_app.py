@@ -81,7 +81,11 @@ def render_overview(s: Store, w: str) -> None:
         r = analysis.retries(s, w)
         if r:
             st.dataframe(pd.DataFrame(r), hide_index=True, width="stretch")
-        st.dataframe(pd.DataFrame(planner.guardrails(s, w)), hide_index=True, width="stretch")
+        g = planner.guardrails(s, w)
+        st.dataframe(pd.DataFrame(g), hide_index=True, width="stretch")
+        for x in [x for x in g if x["priority"] == "high" and x["kind"] == "timeout"]:
+            if st.button(f"Propose a {x['value']} timeout on {x['hop']} (an experiment showed it hangs)", key=f"gr{x['hop']}", disabled=PUBLIC):
+                st.session_state.flash = actions.propose_guardrail(s, x["hop"]); st.rerun()
 
 
 def render_ledger(s: Store, w: str) -> None:
