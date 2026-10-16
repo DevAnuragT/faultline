@@ -364,10 +364,10 @@
   ]
  },
  "GHSA-m2qf-hxjv-5gpq": {
-  "confidence": 0.5,
+  "confidence": 1.0,
   "patch_url": "https://github.com/pallets/flask/commit/70f906c51ce49c485f1d355703e9cc3386b1cc2b",
-  "rationale": "gemini failed (ServerError); highest-scoring changed function in the fix commit (score 19); not model-verified",
-  "source": "heuristic",
+  "rationale": "The save_session function was updated to ensure the 'Vary: Cookie' header is added even when the session is refreshed (re-sent) without being explicitly accessed or modified, preventing caching issues.",
+  "source": "gemini",
   "symbols": [
    "flask.sessions.SecureCookieSessionInterface.save_session"
   ]

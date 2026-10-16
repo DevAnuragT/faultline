@@ -52,9 +52,11 @@ ORDER BY v.package, v.id
 
 
 def snapshot_hash(st: Store) -> str:
-    """Fingerprint of everything a verdict depends on: pins, per-dist code size, app edges, symbol mappings."""
+    """Fingerprint of everything a verdict depends on: pins, dependency edges with their constraints, per-dist code size, app edges, symbol mappings."""
     parts = [
         st.q("MATCH (p:PackageVersion) RETURN p.key ORDER BY p.key"),
+        st.q("MATCH (a)-[r:DEPENDS_ON]->(b:PackageVersion) RETURN coalesce(a.key, a.name), b.key, r.spec "
+             "ORDER BY coalesce(a.key, a.name), b.key"),
         st.q("MATCH (f:Function) RETURN f.dist, count(f) ORDER BY f.dist"),
         st.q("MATCH ()-[r]->() WHERE type(r) IN ['CALLS','MAYBE_CALLS','REFERENCES'] RETURN type(r), count(r) ORDER BY type(r)"),
         st.q("MATCH (a:Function {layer:'app'})-[r]->(b) RETURN a.qualname, type(r), b.qualname "

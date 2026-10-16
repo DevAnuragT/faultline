@@ -129,3 +129,30 @@ def test_agent_fix_recommendation_never_suggests_the_impossible_bump(st):
     analysis.triage(st)
     res = Toolbox(st).recommend_fixes()
     assert res["plan"]["consistent"]
+
+
+def test_planner_reads_installed_constraints_from_graph_edges_not_pypi(st):
+    """The rejection of 'urllib3 2.6.3 alone' must come from the DEPENDS_ON edge in the graph: relax the edge and the
+    planner's answer changes, with PyPI metadata unchanged."""
+    from reachable import planner
+    analysis.triage(st)
+    assert planner.plan_remediation(st).rejected  # edge says requests 2.25.1 needs urllib3<1.27
+    st.q("MATCH (:PackageVersion {name:'requests'})-[r:DEPENDS_ON]->(:PackageVersion {name:'urllib3'}) SET r.spec='>=1.21.1'")
+    relaxed = planner.plan_remediation(st)
+    try:
+        assert not [r for r in relaxed.rejected if r["package"] == "urllib3"]  # no longer "impossible on its own"
+        assert relaxed.pins_after["urllib3"] == "2.6.3"
+    finally:
+        st.q("MATCH (:PackageVersion {name:'requests'})-[r:DEPENDS_ON]->(:PackageVersion {name:'urllib3'}) "
+             "SET r.spec='<1.27,>=1.21.1'")
+
+
+def test_snapshot_changes_when_dependency_topology_changes_with_equal_edge_counts(st):
+    before = analysis.snapshot_hash(st)
+    st.q("MATCH (:PackageVersion {name:'requests'})-[r:DEPENDS_ON]->(:PackageVersion {name:'urllib3'}) SET r.spec='>=1.0'")
+    try:
+        assert analysis.snapshot_hash(st) != before
+    finally:
+        st.q("MATCH (:PackageVersion {name:'requests'})-[r:DEPENDS_ON]->(:PackageVersion {name:'urllib3'}) "
+             "SET r.spec='<1.27,>=1.21.1'")
+    assert analysis.snapshot_hash(st) == before

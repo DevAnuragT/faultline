@@ -27,10 +27,11 @@ candidate list (structured JSON). Heuristic fallback is labelled `heuristic`; on
 
 ## Planner (`reachable/planner.py`)
 Targets come from exposed advisories' fixed versions. Each target is first checked **alone** against the installed
-dependents using the `spec` on `DEPENDS_ON` edges (that is where `urllib3==2.6.3` is rejected because `requests 2.25.1`
-requires `urllib3<1.27`). It then searches PyPI release metadata (cached) for the smallest dependent version that allows
-the target, iterates to a fixpoint, and finally runs a pin-consistency dry-run (every pinned package's requirements on
-other pinned packages must hold).
+dependents using the `spec` stored on the graph's `DEPENDS_ON` edges (that is where `urllib3==2.6.3` is rejected because
+`requests 2.25.1` requires `urllib3<1.27`; `tests/test_pipeline.py` relaxes the edge in the graph and the rejection disappears).
+Constraints of *candidate* versions that are not in the graph yet (e.g. which `requests` release allows `urllib3 2.x`) come
+from cached PyPI release metadata. It searches for the smallest dependent version that allows the target, iterates to a
+fixpoint, and finally runs a pin-consistency dry-run (every pinned package's requirements on other pinned packages must hold).
 
 ## Closed loop (`reachable/verify.py`)
 Builds the candidate pins into a private scratch graph (real sources, real advisories), re-triages, compares to the
@@ -40,7 +41,7 @@ The result and the baseline snapshot are stored as a `Remediation` node.
 
 ## Approvals (`reachable/actions.py`)
 Canonical JSON payload + SHA-256 stored on the `Action`. Execution: tamper check, then rebuild the payload from the
-current graph and compare, then execute. The snapshot hash covers pins, per-distribution code size, edge counts, app
+current graph and compare, then execute. The snapshot hash covers pins, dependency edges with their constraints, per-distribution code size, edge counts, app
 edges and symbol mappings, so any change in evidence expires pending approvals; re-running triage on an identical graph
 does not.
 

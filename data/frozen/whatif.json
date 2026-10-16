@@ -1,9 +1,9 @@
 {
   "variant": "no_preview_fetch",
   "description": "Remove the outbound HTTP call from /preview",
-  "recorded_at": 1792137979,
-  "baseline_snapshot": "030644ccec3e1072",
-  "variant_snapshot": "ce6ed848d338ba64",
+  "recorded_at": 1792156388,
+  "baseline_snapshot": "7f7091cc64cbaf4c",
+  "variant_snapshot": "a1554227a9fdcc7c",
   "flips": [
     {
       "vuln": "GHSA-2xpw-w6gg-jr37",

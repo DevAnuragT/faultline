@@ -73,7 +73,7 @@ baseline (`tests/test_verify.py`).
 * **Trust is part of the schema.** `CALLS` / `MAYBE_CALLS` / `REFERENCES` are different relationship types, so one engine answers both "provably" and "plausibly".
 * **Evidence and authorization live in the graph, across sessions.** Findings keep their witness path; approvals bind to a snapshot of the graph. Change the graph and old approvals expire.
 * **A fix is checked in a second graph.** The candidate dependency set is built into a private scratch graph in the same FalkorDB instance (multi-graph), the same verdict queries run there, and the two are compared through gates. The public site does this live for every visitor and deletes the scratch graph afterwards.
-* **Version constraints are graph edges**, so the planner can reason about co-upgrades.
+* **Version constraints are graph edges** (`DEPENDS_ON {spec}`): the planner rejects an impossible bump by reading the installed packages' constraints from the graph; only not-yet-installed candidate versions are looked up in PyPI metadata.
 * Remove FalkorDB and there are no verdicts, no evidence, no scratch-graph verification and no action authorization; the app fails closed.
 
 (`algo.betweenness` over the 7-node dependency graph is shown as an extra tool; it is not what makes the graph essential.)
