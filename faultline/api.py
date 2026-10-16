@@ -67,7 +67,7 @@ def trace(trace_id: str):
 @app.get("/api/planner")
 def plan(window: str | None = None):
     s, w = st(), _w(window)
-    return {"window": w, "experiments": planner.rank_experiments(s, w), "next_fix": planner.next_fix(s, w)}
+    return {"window": w, "experiments": planner.rank_experiments(s, w), "next_fix": planner.next_fix(s, w), "remedies": planner.remedies(s, w)}
 
 
 @app.get("/api/ledger")
@@ -76,10 +76,11 @@ def ledger():
     _, ex = s.ro("""MATCH (e:Experiment)-[:TARGETS]->(sv) OPTIONAL MATCH (e)-[a:ACTUAL_IMPACT]->(o:Operation)
                     OPTIONAL MATCH (e)-[:BASELINE]->(b) OPTIONAL MATCH (e)-[:OBSERVED]->(ob)
                     RETURN e.id, sv.name, e.hypothesis, e.verdict, e.lesson, e.ts, b.id, ob.id,
-                           collect({op:o.name, fail_rate:a.fail_rate, p50_ms:a.p50_ms, failed_fast:a.failed_fast}) ORDER BY e.ts DESC""")
+                           collect({op:o.name, fail_rate:a.fail_rate, p50_ms:a.p50_ms, failed_fast:a.failed_fast}), e.parts ORDER BY e.ts DESC""")
     _, fx = s.ro("MATCH (f:Fix)-[:BEFORE]->(b) MATCH (f)-[:AFTER]->(a) RETURN f.id, f.service, f.flags, f.verdict, f.gates, f.next_owner, b.id, a.id, f.ts ORDER BY f.ts DESC")
     return {"experiments": [{"id": r[0], "target": r[1], "hypothesis": r[2], "verdict": r[3], "lesson": r[4], "ts": r[5], "baseline": r[6], "observed": r[7],
-                             "impact": [x for x in r[8] if x["op"]]} for r in ex],
+                             "impact": [x for x in r[8] if x["op"]],
+                             "parts": [{"passed": g.startswith("PASS"), "text": g[5:]} for g in (r[9] or [])]} for r in ex],
             "fixes": [{"id": r[0], "service": r[1], "flags": r[2], "verdict": r[3], "gates": [{"passed": g.startswith("PASS"), "text": g[5:]} for g in r[4]],
                        "next_owner": r[5], "before": r[6], "after": r[7], "ts": r[8]} for r in fx]}
 
