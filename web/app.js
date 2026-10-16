@@ -78,8 +78,21 @@ function show(view) {
   if (view === "experiments") loadExperiments();
   if (view === "approvals") loadActions();
   if (view === "graph") loadGraphView();
+  document.body.dataset.view = view;
+  syncHash(view);
 }
-window.addEventListener("hashchange", () => { show(location.hash.replace("#", "") || "findings"); window.scrollTo({ top: 0 }); });
+/* deep links: #view?w=<window>&t=<trace>. Pasting one restores the view, the window and the open trace. */
+const VIEWS = ["findings", "trace", "experiments", "agent", "approvals", "graph"];
+function route() { const [v, q] = location.hash.slice(1).split("?"); const p = new URLSearchParams(q || ""); return { view: VIEWS.includes(v) ? v : "findings", w: p.get("w"), t: p.get("t") }; }
+function linkFor(view) { const p = new URLSearchParams(); if (state.window) p.set("w", state.window); if (view === "trace" && state.traceId) p.set("t", state.traceId); return `#${view}?${p}`; }
+function syncHash(view) { const h = linkFor(view); if (location.hash !== h) history.replaceState(null, "", h); }
+function go(view) { history.pushState(null, "", linkFor(view)); show(view); window.scrollTo({ top: 0 }); }
+window.addEventListener("hashchange", async () => {
+  const r = route();
+  if (r.w && r.w !== state.window && state.windows.some((x) => x.id === r.w)) { state.window = r.w; state.traceId = null; $("#window").value = r.w; setCompareDefaults(); loadOverview(); }
+  if (r.t) state.traceId = r.t;
+  show(r.view); window.scrollTo({ top: 0 });
+});
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.overview && !$("#view-findings").hidden && Math.abs($("#svc-graph").clientWidth - state.graphW) > 40) drawGraph(state.overview); }, 200); });
 
@@ -92,12 +105,17 @@ async function boot() {
   $("#meta-public").hidden = !state.meta.public;
   const w = await api("/api/windows");
   state.windows = w.windows; state.window = w.steady;
+  const r0 = route();
+  if (r0.w && w.windows.some((x) => x.id === r0.w)) state.window = r0.w;
+  if (r0.t) state.traceId = r0.t;
   const sel = $("#window");
   sel.innerHTML = [...w.windows].reverse().map(windowOption).join("");
   sel.value = state.window;
-  sel.addEventListener("change", () => { state.window = sel.value; loadOverview(); const v = location.hash.replace("#", "") || "findings"; if (v !== "findings") show(v); });
+  sel.addEventListener("change", () => { state.window = sel.value; state.traceId = null; setCompareDefaults(); loadOverview(); const v = route().view; if (v !== "findings") show(v); else syncHash(v); });
   for (const id of ["cmp-a", "cmp-b"]) $(`#${id}`).innerHTML = w.windows.map((x) => `<option value="${x.id}">${esc(x.label)} · ${x.id}</option>`).join("");
   $("#cmp-a").value = w.windows[0]?.id; $("#cmp-b").value = w.windows[w.windows.length - 1]?.id;
+  setCompareDefaults();
+  loadWindowRanges();
   $("#cmp-a").addEventListener("change", loadCompare); $("#cmp-b").addEventListener("change", loadCompare);
   state.recorded = await api("/api/agent/recorded");
   if (state.recorded.turns?.length) {
@@ -107,7 +125,7 @@ async function boot() {
   renderChat();
   await loadOverview();
   document.body.classList.remove("loading");
-  show(location.hash.replace("#", "") || "findings");
+  show(route().view);
   pollActions();
   tourAuto();
 }
@@ -136,7 +154,7 @@ async function loadOverview() {
   $("#owners tbody").innerHTML = o.owners.slice(0, 9).map((x, i) => `<tr class="${i === 0 ? "lead" : ""}">
     <td class="num rank">${i + 1}</td>
     <td><div class="owner-name">${esc(x.service)} <span class="op">${esc(x.op)}${x.peer ? ` → ${esc(x.peer)}` : ""}</span></div>${x.code ? `<span class="owner-code">${codeLink(x.code)}</span>` : ""}</td>
-    <td><div class="share"><span class="bar"><i style="width:${Math.max(2, 100 * x.share_pct / max)}%"></i></span><span class="pct">${x.share_pct}%</span></div></td>
+    <td data-sort-value="${x.share_pct}"><div class="share"><span class="bar"><i style="width:${Math.max(2, 100 * x.share_pct / max)}%"></i></span><span class="pct">${x.share_pct}%</span></div></td>
     <td class="num">${fmt(x.per_request_ms)}</td></tr>`).join("") || `<tr><td colspan="4">${empty("No critical-path data", "This window has no steady-state traces to attribute.")}</td></tr>`;
 
   const findings = [...o.findings].sort((a, b) => (SEV[a.severity] ?? 3) - (SEV[b.severity] ?? 3));
@@ -152,7 +170,9 @@ async function loadOverview() {
   $("#retries tbody").innerHTML = o.retries.map((r) => `<tr><td class="mono">${esc(r.service)} ${esc(r.op)}</td><td class="num">${r.retried_errors}</td><td class="num">${fmt(r.wasted_ms_per_request, 1)}</td><td class="num">${fmt(r.retries_on_critical_path)}</td></tr>`).join("")
     || `<tr><td colspan="4">${empty("No silent retries", "No failed call was retried without surfacing an error.", "check")}</td></tr>`;
   $$("[data-propose-guardrail]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "guardrail", hop: b.dataset.proposeGuardrail }); proposed(r, `Proposed: ${r.title || r.action}. Approve it under Approvals.`); pollActions(); }));
+  applySort("owners"); applySort("guardrails");
   drawGraph(o);
+  loadStatus(); loadNextSteps();
 }
 
 function codeLink(c) {
@@ -208,18 +228,46 @@ function hideTip() { $("#tip").hidden = true; }
 
 /* ---------- trace ---------- */
 async function loadTrace() {
-  const c = await api(`/api/chain?window=${encodeURIComponent(state.window)}`);
+  const w = state.window, id = state.traceId;
+  renderTraceMode();
+  loadTraceList(w);
+  if (id) {
+    const wf = await api(`/api/trace/${encodeURIComponent(id)}`);
+    if (state.traceId !== id) return;
+    if (!wf.spans.length) {
+      clearWaterfall(`No trace with id ${id} in the graph.`);
+      $("#chain tbody").innerHTML = `<tr><td colspan="5">${empty("Trace not found", `Check the id, or open one of the slowest requests listed here. <button class="linkish" type="button" data-trace-open="">Back to the slowest request</button>`)}</td></tr>`;
+      return;
+    }
+    drawWaterfall(wf);
+    /* the critical chain of any trace is its critical spans in start order */
+    renderChain(wf.spans.filter((x) => x.critical).map((x) => ({ service: x.service, op: x.op, peer: x.peer, duration_ms: x.duration_ms, self_ms: x.self_ms })));
+    return;
+  }
+  const c = await api(`/api/chain?window=${encodeURIComponent(w)}`);
+  if (state.traceId || state.window !== w) return;
   const wf = c.waterfall;
   if (!wf) {
-    $("#trace-meta").textContent = "No steady-state trace in this window.";
-    $("#waterfall").innerHTML = ""; $("#waterfall").style.height = "0px";
+    clearWaterfall("No steady-state trace in this window.");
     $("#chain tbody").innerHTML = `<tr><td colspan="5">${empty("No trace to show", "This window has no steady-state request. Pick another window in the top bar.")}</td></tr>`;
     return;
   }
+  drawWaterfall(wf);
+  renderChain(c.chain);
+}
+function clearWaterfall(text) { $("#trace-meta").textContent = text; $("#waterfall").innerHTML = ""; $("#waterfall").style.height = "0px"; }
+function renderTraceMode() {
+  $("#trace-mode").innerHTML = state.traceId
+    ? `Showing trace <span class="mono">${esc(state.traceId.slice(0, 16))}${state.traceId.length > 16 ? "…" : ""}</span> <button class="linkish" type="button" data-trace-open="">Back to the slowest request</button>`
+    : "Showing the slowest steady-state request in this window.";
+}
+function drawWaterfall(wf) {
   const crit = wf.spans.filter((s) => s.critical).length;
-  $("#trace-meta").innerHTML = [["", wf.root], [fmt(wf.duration_ms), "ms end to end"], [wf.spans.length, "spans"], [crit, "on the critical path"], ["", `trace ${wf.trace.slice(0, 12)}…`]]
-    .map(([v, l]) => `<span class="m">${v !== "" ? `<b>${esc(v)}</b> ` : ""}${esc(l)}</span>`).join("");
+  $("#trace-meta").innerHTML = [["", wf.root], [fmt(wf.duration_ms), "ms end to end"], [wf.spans.length, "spans"], [crit, "on the critical path"]]
+    .map(([v, l]) => `<span class="m">${v !== "" ? `<b>${esc(v)}</b> ` : ""}${esc(l)}</span>`).join("")
+    + `<span class="m idm">trace <span class="mono">${esc(wf.trace.slice(0, 12))}…</span>${copyBtn(wf.trace, "trace id")}</span>`;
   $("#trace-meta").title = `trace ${wf.trace}`;
+  state.shownTrace = wf.trace; markShownTrace();
   const spans = wf.spans; const rowH = 22, left = 270, right = 24, top = 26; const W = Math.max(760, $(".waterfall-wrap").clientWidth), H = top + spans.length * rowH + 10;
   const x = d3.scaleLinear().domain([0, wf.duration_ms]).range([left, W - right]);
   const svg = d3.select("#waterfall").attr("viewBox", `0 0 ${W} ${H}`).style("height", H + "px"); svg.selectAll("*").remove();
@@ -232,8 +280,30 @@ async function loadTrace() {
     .style("fill", (d) => d.error ? V("--crit") : d.critical ? V("--ember") : V("--slate")).attr("fill-opacity", (d) => d.critical || d.error ? 1 : 0.8);
   g.append("rect").attr("x", (d) => x(d.offset_ms)).attr("y", 5).attr("height", rowH - 10).attr("width", (d) => d.critical ? Math.max(0, x(d.offset_ms + d.self_ms) - x(d.offset_ms)) : 0).attr("rx", 2).style("fill", V("--fg")).attr("fill-opacity", 0.22);
   g.on("mousemove", (ev, d) => tip(ev, `${d.service} ${d.op}${d.peer ? ` → ${d.peer}` : ""}\nstart +${fmt(d.offset_ms, 1)} ms · ${fmt(d.duration_ms, 1)} ms${d.critical ? ` · self ${fmt(d.self_ms, 1)} ms on the critical path` : ""}${d.error ? "\nERROR" : ""}`)).on("mouseleave", hideTip);
-  $("#chain tbody").innerHTML = c.chain.map((s) => `<tr><td>${esc(s.service)}</td><td class="mono">${esc(s.op)}</td><td class="mono muted">${esc(s.peer) || `<span class="hint">—</span>`}</td><td class="num">${fmt(s.duration_ms, 1)}</td><td class="num">${s.self_ms >= 1 ? `<b>${fmt(s.self_ms, 1)}</b>` : fmt(s.self_ms, 1)}</td></tr>`).join("");
 }
+function renderChain(chain) {
+  $("#chain tbody").innerHTML = chain.map((s) => `<tr><td>${esc(s.service)}</td><td class="mono">${esc(s.op)}</td><td class="mono muted">${esc(s.peer) || `<span class="hint">—</span>`}</td><td class="num">${fmt(s.duration_ms, 1)}</td><td class="num">${s.self_ms >= 1 ? `<b>${fmt(s.self_ms, 1)}</b>` : fmt(s.self_ms, 1)}</td></tr>`).join("")
+    || `<tr><td colspan="5">${empty("No critical spans", "This trace has no spans marked on the critical path.")}</td></tr>`;
+}
+/* the slowest requests come from a read-only Cypher query, like every other number here */
+async function loadTraceList(w) {
+  let r;
+  try { r = await post("/api/query", { cypher: `MATCH (t:Trace {window:'${w.replace(/'/g, "")}'}) RETURN t.id, t.root, t.duration_ms, t.status, t.errors ORDER BY t.duration_ms DESC LIMIT 10` }); }
+  catch (e) { r = { error: e.message }; }
+  if (state.window !== w) return;
+  $("#trace-list tbody").innerHTML = r.error ? `<tr><td colspan="4">${empty("Could not list requests", esc(r.error), "alert")}</td></tr>`
+    : r.rows.map(([id, root, ms, status, errors]) => `<tr data-trace="${esc(id)}"><td><span class="mono">${esc(String(id).slice(0, 12))}…</span>${copyBtn(id, "trace id")}<span class="cell-sub">${esc(root)}${errors ? ` · ${errors} error span${errors === 1 ? "" : "s"}` : ""}</span></td><td class="num">${fmt(ms)}</td><td><span class="pill ${String(status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(status || "none")}</span></td><td class="act"><button class="btn small" type="button" data-trace-open="${esc(id)}">Open</button></td></tr>`).join("")
+    || `<tr><td colspan="4">${empty("No requests", "This window has no traces.")}</td></tr>`;
+  markShownTrace();
+}
+function markShownTrace() { $$("#trace-list tr[data-trace]").forEach((tr) => { const on = tr.dataset.trace === state.shownTrace; tr.classList.toggle("current", on); const b = tr.querySelector("[data-trace-open]"); if (b) { b.disabled = on; b.textContent = on ? "Shown" : "Open"; } }); }
+function openTrace(id) {
+  state.traceId = id || null;
+  if (route().view !== "trace") { go("trace"); return; }
+  syncHash("trace"); loadTrace(); window.scrollTo({ top: 0 });
+}
+$("#trace-form").addEventListener("submit", (e) => { e.preventDefault(); const id = $("#trace-q").value.trim().replace(/^.*[#?&]t=/, ""); openTrace(id); $("#trace-q").value = ""; });
+document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-trace-open]"); if (b) { e.preventDefault(); openTrace(b.dataset.traceOpen); } });
 
 /* ---------- experiments ---------- */
 const VERDICT = {
@@ -254,10 +324,12 @@ async function loadExperiments() {
   $("#planner tbody").innerHTML = p.experiments.map((r) => {
     const hist = r.reasons.filter((x) => x.startsWith("tested before")), rest = r.reasons.filter((x) => !x.startsWith("tested before"));
     return `<tr><td><b>${esc(r.target)}</b></td>
-      <td><div class="prio"><span class="bar"><i style="width:${100 * r.priority / maxP}%"></i></span><span class="v">${r.priority.toFixed(2)}</span></div></td>
+      <td data-sort-value="${r.priority}"><div class="prio"><span class="bar"><i style="width:${100 * r.priority / maxP}%"></i></span><span class="v">${r.priority.toFixed(2)}</span></div></td>
       <td><div class="reasons">${r.skip ? `<div><span class="pill muted"><i></i>skipped</span> ${esc(r.skip)}</div>` : ""}<div>${rest.map(nice).join(" · ")}</div>${hist.map((x) => `<div class="history">${nice(x)}</div>`).join("")}</div></td>
       <td class="act">${r.target !== "frontend" && !r.skip ? `<button class="btn small" data-propose-exp="${r.target}" ${lock()}>Propose pause</button>` : ""}</td></tr>`;
   }).join("") || `<tr><td colspan="4">${empty("Nothing to break", "The planner found no candidate target in this window.")}</td></tr>`;
+  applySort("planner");
+  state.planner = p; state.ledger = l;
   $$("[data-propose-exp]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "experiment", target: b.dataset.proposeExp }); proposed(r, `Proposed ${r.action}. Approve it under Approvals.`); pollActions(); }));
   const nf = p.next_fix;
   $("#next-fix").innerHTML = nf && nf.flags ? `<div class="flag">${esc(nf.flags.join(" "))}<span class="on">on ${esc(nf.service)}</span></div><p>${esc(nf.why)}</p>
@@ -278,26 +350,15 @@ async function loadExperiments() {
   $$("[data-propose-pr]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "pr", subject: b.dataset.proposePr }); proposed(r, `Proposed ${r.action}: ${r.title}. Approve it under Approvals.`); pollActions(); }));
   const inc = await api("/api/incidents");
   countMeta("#n-incidents", inc.incidents.length, "incident");
-  $("#incidents").innerHTML = inc.incidents.map((i) => `<article class="card"><div class="card-head"><span class="pill bad"><i></i>${esc(i.kind)}</span><h5 class="card-title">${esc(i.endpoint)} <span class="muted">in</span> <span class="mono">${esc(i.label)}</span></h5><span class="span">${esc(i.window)}</span><span class="when">${i.traces} traces</span></div>
-    <dl class="kv"><dt>Failure rate</dt><dd><span class="from">${pct(i.fail_rate[0])} →</span> <b>${pct(i.fail_rate[1])}</b></dd><dt>p95</dt><dd><span class="from">${fmt(i.p95_ms[0])} →</span> <b>${fmt(i.p95_ms[1])}</b> ms</dd>
-    ${i.owner ? `<dt>What moved</dt><dd>${esc(label(i.owner))}: ${fmt(i.owner.baseline_per_request_ms)} → ${fmt(i.owner.per_request_ms)} ms per request ${i.owner.code ? `· ${codeLink(i.owner.code)}` : ""}</dd>` : ""}
-    ${i.hop ? `<dt>Where to look</dt><dd class="mono">${nice(i.hop)}</dd>` : ""}${i.worst_trace ? `<dt>Worst request</dt><dd class="mono">${esc(i.worst_trace.id)} · ${fmt(i.worst_trace.duration_ms)} ms · status ${esc(i.worst_trace.status || "none")}</dd>` : ""}</dl>
-    <div class="card-foot"><span class="hint">Files a GitHub issue with this evidence once approved.</span><button class="btn small" data-propose-issue="${i.window}" ${lock()}>Propose incident issue</button></div></article>`).join("") || empty("No incidents", "No window regressed against the current steady state.", "check");
+  state.incidents = inc.incidents;
+  $("#incidents").innerHTML = inc.incidents.map(incidentCard).join("") || empty("No incidents", "No window regressed against the current steady state.", "check");
   $$("[data-propose-issue]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "issue", window: b.dataset.proposeIssue }); proposed(r, `Proposed ${r.action}. Approve it under Approvals.`); pollActions(); }));
   loadCompare();
 }
 async function loadCompare() {
   const a = $("#cmp-a").value, b = $("#cmp-b").value; if (!a || !b) return;
   const d = await api(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
-  /* lower is better for every measure here: latency, failure rate, time owned */
-  const delta = (x, y, points = false) => {
-    if (x == null || y == null) return `<span class="delta flat">—</span>`;
-    if (points) { const dp = Math.round((y - x) * 100); return `<span class="delta ${dp > 0 ? "up" : dp < 0 ? "down" : "flat"}">${dp > 0 ? "+" : ""}${dp} pts</span>`; }
-    if (!x) return `<span class="delta ${y > 0 ? "up" : "flat"}">${y > 0 ? "new" : "0%"}</span>`;
-    const r = (y - x) / x, cls = Math.abs(r) < 0.02 ? "flat" : r > 0 ? "up" : "down";
-    const txt = y / x >= 10 ? `×${fmt(y / x, 0)}` : `${r > 0 ? "+" : ""}${Math.round(r * 100)}%`;
-    return `<span class="delta ${cls}">${txt}</span>`;
-  };
+  const delta = (x, y, points = false) => deltaChip(x, y, points) || `<span class="delta flat">—</span>`;
   const row = (lbl, x, y, unit, dec = 0, points = false) => `<tr><td class="lbl-cell">${lbl}</td><td class="num">${points ? pct(x) : `${fmt(x, dec)}${unit}`}</td><td class="num">${points ? pct(y) : `${fmt(y, dec)}${unit}`}</td><td class="num">${delta(x, y, points)}</td></tr>`;
   $("#compare tbody").innerHTML = d.health.map((h) => `<tr class="sect"><td colspan="4">${esc(h.op)}</td></tr>${row("p50 latency", h.p50_ms[0], h.p50_ms[1], " ms")}${row("p95 latency", h.p95_ms[0], h.p95_ms[1], " ms")}${row("failed requests", h.fail_rate[0], h.fail_rate[1], "", 0, true)}`).join("")
     + (d.owners.length ? `<tr class="sect"><td colspan="4">Critical-path time per request</td></tr>` + d.owners.slice(0, 5).map((o) => row(nice(o.owner), o.per_request_ms[0], o.per_request_ms[1], " ms")).join("") : "")
@@ -348,14 +409,14 @@ function actionCard(a) {
   const status = job?.status === "running" ? "running" : a.status;
   return `<article class="card${a.status === "proposed" && !job ? " pending" : ""}"><div class="card-head">${statusPill(status)}<h4 class="card-title">${nice(a.title)}</h4>${ago(a.ts)}</div>
     <p class="card-text">${nice(a.rationale)}</p>
-    <div class="meta-line"><span class="tag">${esc(a.type || "action")}</span><span>${esc(a.id)}</span><span class="fp" tabindex="0" data-help="evidence-hash">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span></div>
+    <div class="meta-line"><span class="tag">${esc(a.type || "action")}</span><span class="idm">${esc(a.id)}${copyBtn(a.id, "action id")}</span><span class="idm"><span class="fp" tabindex="0" data-help="evidence-hash">${icon("fp", "ico")}evidence <b>${esc(a.hash)}</b></span>${copyBtn(a.hash, "evidence hash")}</span></div>
     ${a.status === "proposed" && !job ? `<div class="actions"><button class="btn primary small" data-approve="${a.id}" ${lock()}>Approve and run</button><button class="btn small" data-reject="${a.id}" ${lock()}>Reject</button>${state.meta.public ? `<span class="locked"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Turned off in the read-only demo</span>` : ""}</div>` : ""}
     ${job?.log?.length ? `<div class="log-head">${job.status === "running" ? `<i class="live" aria-hidden="true"></i>Live log` : "Log"}</div><pre class="log" aria-live="polite">${esc(job.log.join("\n"))}</pre>` : ""}
     ${resultView(a.result || job?.result)}</article>`;
 }
 async function loadActions() {
   const r = await api("/api/actions");
-  state.jobs = r.jobs || {};
+  state.jobs = r.jobs || {}; state.actions = r.actions;
   const pending = r.actions.filter((a) => a.status === "proposed").length;
   $("#pending-count").textContent = pending; $("#pending-count").hidden = !pending;
   const waiting = r.actions.filter((a) => a.status === "proposed" || state.jobs[a.id]?.status === "running"), rest = r.actions.filter((a) => !waiting.includes(a));
@@ -698,7 +759,289 @@ function tourKeys(e) {
 function tourAuto() { if (!tour.seen && store.get("fl-tour") !== "done") tourStart(); }
 document.addEventListener("click", (e) => { if (e.target.closest?.("[data-tour-start]")) { e.preventDefault(); tourStart(); } });
 /* leaving through the browser's back button ends the tour instead of stranding it */
-window.addEventListener("hashchange", () => { if (tour.open && location.hash.replace("#", "") !== TOUR[tour.i].view) tourEnd(false); });
+window.addEventListener("hashchange", () => { if (tour.open && route().view !== TOUR[tour.i].view) tourEnd(false); });
+
+/* ======================================================================
+   SRE workflow: baseline status, next steps, runbook incidents, copyable ids,
+   keyboard shortcuts, sortable tables, density, Markdown export.
+   ====================================================================== */
+const byCreated = () => [...state.windows].sort((a, b) => a.created - b.created);
+const winLabel = (id) => { const x = state.windows.find((w) => w.id === id); return x ? x.label : id; };
+const isExperiment = (id) => winLabel(id).startsWith("pause-");
+/* the baseline of a window is the steady-state window captured just before it, the same rule incident detection uses */
+function baselineOf(id) {
+  const ws = byCreated(), me = ws.find((x) => x.id === id);
+  return me ? ws.filter((x) => x.created < me.created && !x.label.startsWith("pause-")).pop() || null : null;
+}
+function setCompareDefaults() {
+  const base = baselineOf(state.window);
+  if (base) { $("#cmp-a").value = base.id; $("#cmp-b").value = state.window; }
+}
+/* lower is better for every measure shown with a delta: latency, failure rate, time owned */
+function deltaChip(x, y, points = false, cls = "delta") {
+  if (x == null || y == null) return "";
+  if (points) { const dp = Math.round((y - x) * 1000) / 10; return `<span class="${cls} ${dp > 0.5 ? "up" : dp < -0.5 ? "down" : "flat"}">${dp > 0 ? "+" : dp < 0 ? "−" : "±"}${fmt(Math.abs(dp), Math.abs(dp) < 10 && dp % 1 ? 1 : 0)} pts</span>`; }
+  if (!x) return `<span class="${cls} ${y > 0 ? "up" : "flat"}">${y > 0 ? "new" : "±0%"}</span>`;
+  const r = (y - x) / x, c = Math.abs(r) < 0.02 ? "flat" : r > 0 ? "up" : "down";
+  return `<span class="${cls} ${c}">${y / x >= 10 ? `×${fmt(y / x, 0)}` : `${r > 0 ? "+" : r < 0 ? "−" : "±"}${Math.round(Math.abs(r) * 100)}%`}</span>`;
+}
+const clock = (us) => us ? new Date(us / 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+function span(id) {
+  const r = state.ranges?.[id]; if (!r) return "";
+  const secs = Math.max(1, Math.round((r[1] - r[0]) / 1e6));
+  return `${new Date(r[0] / 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${clock(r[0])} to ${clock(r[1])} (${secs < 120 ? `${secs} s` : `${Math.round(secs / 60)} min`})`;
+}
+async function loadWindowRanges() {
+  try {
+    const r = await post("/api/query", { cypher: "MATCH (w:Window) RETURN w.id, w.start_us, w.end_us" });
+    state.ranges = Object.fromEntries((r.rows || []).map(([id, a, b]) => [id, [a, b]]));
+    if (state.status) renderStatus(state.status);
+  } catch (e) {}
+}
+
+/* ---------- status banner and KPI deltas ---------- */
+async function loadStatus() {
+  const w = state.window, base = baselineOf(w), h = state.overview?.health[0];
+  if (!base || !h) {
+    state.status = { kind: base ? "unknown" : "baseline", w, base, h };
+    ["#d-p50", "#d-p95", "#d-fail"].forEach((id) => ($(id).innerHTML = ""));
+    renderStatus(state.status); return;
+  }
+  let d, inc;
+  try { [d, inc] = await Promise.all([api(`/api/compare?a=${encodeURIComponent(base.id)}&b=${encodeURIComponent(w)}`), api("/api/incidents")]); } catch (e) { return; }
+  if (state.window !== w) return;
+  let c = d.health.find((x) => x.op === h.op) || d.health[0];
+  if (!c) { state.status = { kind: "unknown", w, base, h }; renderStatus(state.status); return; }
+  $("#d-p50").innerHTML = deltaChip(c.p50_ms[0], c.p50_ms[1], false, "kdelta-chip");
+  $("#d-p95").innerHTML = deltaChip(c.p95_ms[0], c.p95_ms[1], false, "kdelta-chip");
+  $("#d-fail").innerHTML = deltaChip(c.fail_rate[0], c.fail_rate[1], true, "kdelta-chip");
+  /* incident detection counts hung requests as failed; when it has flagged this window, the banner uses its numbers so the two never disagree */
+  const flagged = inc.incidents.find((x) => x.window === w && x.baseline === base.id && x.endpoint === c.op);
+  if (flagged) c = { op: c.op, p50_ms: flagged.p50_ms, p95_ms: flagged.p95_ms, fail_rate: flagged.fail_rate, hangs: true };
+  const failing = c.fail_rate[1] > c.fail_rate[0] + 0.05, degraded = c.p95_ms[1] > 1.5 * c.p95_ms[0];
+  const faster = c.p50_ms[1] < 0.8 * c.p50_ms[0];
+  state.status = { kind: failing ? "failing" : degraded ? "degraded" : "ok", faster, w, base, h, c, mover: d.owners[0] };
+  const vs = `against ${base.label} (${base.id})`;
+  $("#d-p50").title = `change ${vs}`; $("#d-p95").title = `change ${vs}`; $("#d-fail").title = `change ${vs}`;
+  renderStatus(state.status);
+}
+const STATUS_TEXT = { ok: ["ok", "Healthy"], degraded: ["wait", "Degraded"], failing: ["bad", "Failing"], baseline: ["muted", "Baseline"], unknown: ["muted", "No comparison"] };
+function statusSentence(st) {
+  const op = st.h?.op || "The endpoint", lbl = winLabel(st.w);
+  if (st.kind === "baseline") return `${esc(op)} in <b>${esc(lbl)}</b> is the first window. Later windows are compared against it.`;
+  if (st.kind === "unknown") return `${esc(op)} in <b>${esc(lbl)}</b> has nothing to compare against in <b>${esc(st.base?.label || "the baseline")}</b>.`;
+  const c = st.c, base = `<b>${esc(st.base.label)}</b>`;
+  if (st.kind === "failing") return `${esc(op)} in <b>${esc(lbl)}</b> is failing: ${pct(c.fail_rate[1])} of requests ${c.hangs ? "failed or hung" : "failed"}, against ${pct(c.fail_rate[0])} in ${base}.`;
+  if (st.kind === "degraded") return `${esc(op)} in <b>${esc(lbl)}</b> is slower than normal: p95 is ${fmt(c.p95_ms[1])} ms, against ${fmt(c.p95_ms[0])} ms in ${base}.`;
+  return `${esc(op)} in <b>${esc(lbl)}</b> is within its baseline ${base}${st.faster ? `, and faster: p50 ${fmt(c.p50_ms[0])} → ${fmt(c.p50_ms[1])} ms` : ""}.`;
+}
+function renderStatus(st) {
+  const [k, word] = STATUS_TEXT[st.kind];
+  const exp = isExperiment(st.w);
+  const facts = [];
+  if (st.c) facts.push(`<span class="sf"><span class="k">p50</span>${deltaChip(st.c.p50_ms[0], st.c.p50_ms[1])}</span><span class="sf"><span class="k">p95</span>${deltaChip(st.c.p95_ms[0], st.c.p95_ms[1])}</span><span class="sf"><span class="k">${st.c.hangs ? "failed or hung" : "failed"}</span>${deltaChip(st.c.fail_rate[0], st.c.fail_rate[1], true)}</span>`);
+  if (st.mover && st.mover.per_request_ms[0] !== st.mover.per_request_ms[1]) facts.push(`<span class="sf mover"><span class="k">biggest mover</span>${nice(st.mover.owner)} <span class="mono">${fmt(st.mover.per_request_ms[0])} → ${fmt(st.mover.per_request_ms[1])} ms</span></span>`);
+  $("#status").className = `statusbar is-${st.kind}`;
+  $("#status").innerHTML = `<span class="pill ${k} st-pill"><i></i>${word}</span>
+    <div class="st-main"><p class="st-line">${statusSentence(st)}${exp ? ` <span class="tag">fault experiment</span>` : ""}</p>
+      <div class="st-facts">${facts.join("")}<span class="sf idm"><span class="k">window</span><span class="mono">${esc(st.w)}</span>${copyBtn(st.w, "window id")}</span>${span(st.w) ? `<span class="sf"><span class="k">traces</span>${esc(span(st.w))}</span>` : ""}</div></div>
+    <div class="st-actions">${st.base ? `<a class="btn small" href="#experiments" data-compare-baseline>Compare with ${esc(st.base.label)}</a>` : ""}</div>`;
+}
+document.addEventListener("click", (e) => { if (e.target.closest?.("[data-compare-baseline]")) { e.preventDefault(); setCompareDefaults(); go("experiments"); setTimeout(() => $("#compare").closest(".panel").scrollIntoView({ block: "start" }), 300); } });
+
+/* ---------- next steps on Findings ---------- */
+async function loadNextSteps() {
+  const w = state.window;
+  let p, inc, acts;
+  try { [p, inc, acts] = await Promise.all([api(`/api/planner?window=${encodeURIComponent(w)}`), api("/api/incidents"), api("/api/actions")]); }
+  catch (e) { $("#next-steps").innerHTML = `<li class="empty-li">${empty("Could not work out next steps", esc(e.message), "alert")}</li>`; return; }
+  if (state.window !== w) return;
+  state.planner = p; state.incidents = inc.incidents; state.actions = acts.actions;
+  const steps = [];
+  const i = inc.incidents.find((x) => x.window === w);
+  if (i) steps.push({ type: "issue", subject: w, tone: "bad", title: `File an incident for ${i.endpoint}`,
+    why: `${pct(i.fail_rate[0])} → ${pct(i.fail_rate[1])} failed and p95 ${fmt(i.p95_ms[0])} → ${fmt(i.p95_ms[1])} ms against ${winLabel(i.baseline)}.${i.hop ? ` Look at ${i.hop}.` : ""}`,
+    body: { type: "issue", window: w }, verb: "Propose incident issue",
+    extra: i.worst_trace ? `<a class="linkish" href="#trace?w=${encodeURIComponent(w)}&t=${encodeURIComponent(i.worst_trace.id)}">Open the worst request</a>` : "" });
+  const nf = p.next_fix;
+  if (nf?.flags) steps.push({ type: "fix", subject: nf.flags.join(" "), tone: "wait", title: `Fix ${nf.targets_owner}: ${nf.flags.join(" ")} on ${nf.service}`,
+    why: `${nf.why} It owns ${nf.share_pct}% of critical-path time (${fmt(nf.per_request_ms)} ms per request).`, body: { type: "fix", flags: nf.flags.join(" "), rationale: `targets ${nf.targets_owner} (${nf.share_pct}%)` }, verb: "Propose fix" });
+  const g = state.overview.guardrails.find((x) => x.priority === "high" && x.kind === "timeout");
+  if (g) steps.push({ type: "guardrail", subject: g.hop, tone: "wait", title: `Add a ${g.value} timeout on ${g.hop}`, why: g.evidence, body: { type: "guardrail", hop: g.hop }, verb: "Propose guardrail" });
+  const x = p.experiments.find((r) => !r.skip && r.target !== "frontend" && !r.history && r.priority > 0);
+  if (x) steps.push({ type: "experiment", subject: x.target, tone: "muted", title: `Test what happens when ${x.target} stops`,
+    why: `Nothing has tested it yet. ${x.reasons.join(", ")}.`, body: { type: "experiment", target: x.target }, verb: "Propose pause" });
+  if (!steps.length && state.overview.owners[0]) {
+    const o = state.overview.owners[0];
+    steps.push({ type: "ask", tone: "muted", title: `Ask the agent how to speed up ${label(o)}`, why: `It owns ${o.share_pct}% of critical-path time and no known knob targets it.`, verb: "" });
+  }
+  const pending = (s) => state.actions.find((a) => a.status === "proposed" && a.type === s.type && a.subject === s.subject);
+  $("#next-count").innerHTML = steps.length ? `<b>${steps.length}</b> step${steps.length === 1 ? "" : "s"}` : "";
+  $("#next-steps").innerHTML = steps.map((st) => {
+    const pend = st.subject && pending(st);
+    const act = pend ? `<span class="pill wait"><i></i>awaiting approval</span><a class="btn small" href="#approvals">Review in Approvals</a>`
+      : st.type === "ask" ? `<a class="btn small" href="#agent">Open the agent</a>`
+      : `<button class="btn small${st.type === "issue" ? " primary" : ""}" type="button" data-next="${esc(JSON.stringify(st.body))}" ${lock()}>${esc(st.verb)}</button>`;
+    return `<li class="step tone-${st.tone}"><span class="step-kind">${esc({ issue: "incident", fix: "fix", guardrail: "guardrail", experiment: "experiment", ask: "question" }[st.type])}</span>
+      <div class="step-main"><b>${nice(st.title)}</b><p>${nice(st.why)}</p>${st.extra ? `<p class="step-extra">${st.extra}</p>` : ""}</div><div class="step-act">${act}</div></li>`;
+  }).join("") || `<li class="empty-li">${empty("Nothing to do", "The graph has no action to propose for this window.", "check")}</li>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest?.("[data-next]"); if (!b || b.disabled) return;
+  b.disabled = true;
+  try { const r = await post("/api/propose", JSON.parse(b.dataset.next)); proposed(r, `Proposed: ${r.title || r.action}. Approve it under Approvals.`); }
+  catch (err) { toast(err.message, "bad"); b.disabled = false; }
+  pollActions(); loadNextSteps();
+});
+
+/* ---------- incidents as runbook entries ---------- */
+function incidentCard(i) {
+  const failing = i.kind === "failures";
+  const g = state.overview?.guardrails.find((x) => x.hop === i.hop && x.kind === "timeout");
+  const trace = i.worst_trace ? `<span class="idm"><span class="mono">${esc(i.worst_trace.id.slice(0, 16))}…</span>${copyBtn(i.worst_trace.id, "trace id")}</span> ${fmt(i.worst_trace.duration_ms)} ms · status ${esc(i.worst_trace.status || "none")} · <a class="linkish" href="#trace?w=${encodeURIComponent(i.window)}&t=${encodeURIComponent(i.worst_trace.id)}">Open waterfall</a>` : "";
+  return `<article class="card runbook"><div class="card-head"><span class="pill ${failing ? "bad" : "wait"}"><i></i>${failing ? "failing" : "degraded"}</span><h5 class="card-title">${esc(i.endpoint)} <span class="muted">in</span> <span class="mono">${esc(i.label)}</span></h5><span class="span idm">${esc(i.window)}${copyBtn(i.window, "window id")}</span><span class="when">${i.traces} traces</span></div>
+    <dl class="kv">
+      <dt>Impact</dt><dd>${failing ? `<b>${pct(i.fail_rate[1])}</b> of requests failed <span class="from">(${pct(i.fail_rate[0])} before)</span>; ` : ""}p95 <span class="from">${fmt(i.p95_ms[0])} →</span> <b>${fmt(i.p95_ms[1])}</b> ms; p50 <span class="from">${fmt(i.p50_ms[0])} →</span> <b>${fmt(i.p50_ms[1])}</b> ms</dd>
+      <dt>When</dt><dd>${esc(span(i.window) || "not recorded")} <span class="from">· baseline ${esc(winLabel(i.baseline))} (${esc(i.baseline)})</span></dd>
+      ${i.owner ? `<dt>What moved</dt><dd>${esc(label(i.owner))}: ${fmt(i.owner.baseline_per_request_ms)} → <b>${fmt(i.owner.per_request_ms)}</b> ms per request ${i.owner.code ? `· ${codeLink(i.owner.code)}` : ""}</dd>` : ""}
+      ${i.hop ? `<dt>Where to look</dt><dd class="mono">${nice(i.hop)}</dd>` : ""}
+      ${trace ? `<dt>Worst request</dt><dd>${trace}</dd>` : ""}
+      <dt>Next step</dt><dd>${g ? `Add the ${esc(g.value)} timeout on ${nice(g.hop)} so the hop fails fast. ` : ""}File the incident with this evidence.</dd>
+    </dl>
+    <div class="card-foot"><span class="hint">Both become proposals that wait in Approvals.</span>${g ? `<button class="btn small" type="button" data-next="${esc(JSON.stringify({ type: "guardrail", hop: g.hop }))}" ${lock()}>Propose ${esc(g.value)} timeout</button>` : ""}<button class="btn small" data-propose-issue="${i.window}" ${lock()}>Propose incident issue</button></div></article>`;
+}
+
+/* ---------- copyable ids ---------- */
+const copyBtn = (text, what) => `<button class="copy" type="button" data-copy="${esc(text)}" data-copy-what="${esc(what)}" aria-label="Copy ${esc(what)}" title="Copy ${esc(what)}"><svg class="ico" aria-hidden="true"><use href="#i-copy"/></svg></button>`;
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch (e) {
+    const ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; ta.style.top = "0";
+    document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (e2) {} ta.remove(); return ok;
+  }
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest?.("[data-copy]"); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const ok = await copyText(b.dataset.copy);
+  toast(ok ? `Copied the ${b.dataset.copyWhat}: ${b.dataset.copy.length > 40 ? b.dataset.copy.slice(0, 40) + "…" : b.dataset.copy}` : "The browser blocked the clipboard. Select the text and copy it instead.", ok ? "ok" : "bad");
+  if (ok) { b.classList.add("done"); setTimeout(() => b.classList.remove("done"), 1200); }
+});
+async function copyLink() { const ok = await copyText(location.href); toast(ok ? "Copied a link to this view, with the window and any open trace." : "The browser blocked the clipboard. Copy the address bar instead.", ok ? "ok" : "bad"); }
+$("#copy-link").addEventListener("click", copyLink);
+
+/* ---------- density ---------- */
+function setDensity(d) { document.documentElement.dataset.density = d; $("#density").setAttribute("aria-pressed", String(d === "compact")); store.set("fl-density", d); }
+setDensity(store.get("fl-density") === "compact" ? "compact" : "comfortable");
+$("#density").addEventListener("click", () => setDensity(document.documentElement.dataset.density === "compact" ? "comfortable" : "compact"));
+
+/* ---------- sortable tables ---------- */
+const SORTS = {};
+function initSort(id) {
+  const table = $(`#${id}`);
+  $$("th[data-sort]", table).forEach((th) => {
+    const col = th.cellIndex;
+    th.innerHTML = `<button type="button" class="th-sort">${th.innerHTML}<i aria-hidden="true"></i></button>`;
+    th.querySelector("button").addEventListener("click", () => {
+      const cur = SORTS[id], first = th.dataset.sort === "num" ? "desc" : "asc";
+      SORTS[id] = { col, type: th.dataset.sort, dir: cur && cur.col === col ? (cur.dir === "asc" ? "desc" : "asc") : first };
+      applySort(id);
+    });
+  });
+}
+function applySort(id) {
+  const s = SORTS[id], table = $(`#${id}`); if (!s || !table) return;
+  $$("th[data-sort]", table).forEach((th) => th.setAttribute("aria-sort", th.cellIndex === s.col ? (s.dir === "asc" ? "ascending" : "descending") : "none"));
+  const tb = table.tBodies[0], rows = [...tb.rows].filter((r) => r.cells.length > 1);
+  const val = (r) => { const c = r.cells[s.col]; return c ? (c.dataset.sortValue ?? c.textContent.trim()) : ""; };
+  const num = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, "")); return isNaN(n) ? Infinity : n; };
+  rows.sort((a, b) => { const r = s.type === "num" ? num(val(a)) - num(val(b)) : val(a).localeCompare(val(b), undefined, { numeric: true }); return s.dir === "asc" ? r : -r; });
+  rows.forEach((r) => tb.appendChild(r));
+}
+["owners", "guardrails", "planner"].forEach(initSort);
+
+/* ---------- keyboard ---------- */
+const shortcuts = $("#shortcuts");
+function openShortcuts() { if (!shortcuts.open) shortcuts.showModal(); }
+shortcuts.addEventListener("click", (e) => {
+  if (e.target === shortcuts || e.target.closest("[data-close]") || e.target.closest("[data-tour-start]")) shortcuts.close();
+});
+$("#shortcuts-btn").addEventListener("click", openShortcuts);
+function stepWindow(dir) {
+  const ws = byCreated(), i = ws.findIndex((x) => x.id === state.window), n = ws[i + dir];
+  if (!n) { toast(dir > 0 ? "This is the newest window." : "This is the oldest window."); return; }
+  const sel = $("#window"); sel.value = n.id; sel.dispatchEvent(new Event("change"));
+  toast(`Window: ${n.label} · ${n.id}`);
+}
+let gAt = 0;
+document.addEventListener("keydown", (e) => {
+  if (tour.open || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+  const t = e.target;
+  if (t.closest?.("input, textarea, select, [contenteditable=true]")) { if (e.key === "Escape" && t.blur) t.blur(); return; }
+  if (shortcuts.open) return;
+  const k = e.key;
+  if (gAt && Date.now() - gAt < 1500) {
+    gAt = 0; const v = { f: "findings", t: "trace", e: "experiments", a: "agent", p: "approvals", g: "graph" }[k];
+    if (v) { e.preventDefault(); go(v); }
+    return;
+  }
+  if (k === "g") { gAt = Date.now(); return; }
+  if (k === "?") { e.preventDefault(); openShortcuts(); }
+  else if (k === "/") { e.preventDefault(); if (route().view !== "agent") go("agent"); $("#q").focus(); }
+  else if (k === "w") { e.preventDefault(); $("#window").focus(); }
+  else if (k === "[" || k === "]") { e.preventDefault(); stepWindow(k === "]" ? 1 : -1); }
+  else if (k === "y") { e.preventDefault(); copyLink(); }
+  else if (k === "d") { e.preventDefault(); $("#density").click(); }
+});
+
+/* ---------- Markdown for incident docs and reviews ---------- */
+const mdEsc = (x) => String(x ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+const plain = (x) => String(x ?? "").replace(/ -> /g, " → ");
+function mdReport() {
+  const o = state.overview, h = o.health[0] || {}, st = state.status || {}, base = st.base;
+  const L = [`# ${h.op || "Endpoint"} in ${winLabel(state.window)} (${state.window})`, "",
+    `Status: **${(STATUS_TEXT[st.kind] || ["", "unknown"])[1]}**${base ? ` against ${base.label} (${base.id})` : ""}. Link: ${location.href}`, ""];
+  if (span(state.window)) L.push(`Traces: ${span(state.window)}, ${h.traces} requests.`, "");
+  L.push("| Measure | This window |" + (st.c ? ` ${base.label} | Change |` : ""), "|---|---:|" + (st.c ? "---:|---:|" : ""));
+  const strip = (x) => x.replace(/<[^>]+>/g, "");
+  const c = st.c;
+  const rows = [["p50", `${fmt(c ? c.p50_ms[1] : h.p50_ms)} ms`, c && `${fmt(c.p50_ms[0])} ms`, c && strip(deltaChip(c.p50_ms[0], c.p50_ms[1]))],
+    ["p95", `${fmt(c ? c.p95_ms[1] : h.p95_ms)} ms`, c && `${fmt(c.p95_ms[0])} ms`, c && strip(deltaChip(c.p95_ms[0], c.p95_ms[1]))],
+    [c?.hangs ? "Failed or hung" : "Failed", c?.hangs ? pct(c.fail_rate[1]) : `${pct(h.fail_rate)} (${h.failed} of ${h.traces})`, c && pct(c.fail_rate[0]), c && strip(deltaChip(c.fail_rate[0], c.fail_rate[1], true))]];
+  rows.forEach((r) => L.push(`| ${r[0]} | ${r[1]} |` + (st.c ? ` ${r[2]} | ${r[3]} |` : "")));
+  L.push("", "## Who owns the latency", "", "| # | Owner | Share | ms / request | Code |", "|---:|---|---:|---:|---|");
+  o.owners.slice(0, 6).forEach((x, i) => L.push(`| ${i + 1} | ${mdEsc(label(x))} | ${x.share_pct}% | ${fmt(x.per_request_ms)} | ${mdEsc(x.code ? (x.code.location || `${x.code.file}${x.code.function ? " " + x.code.function : ""}`) : "")} |`));
+  L.push("", "## Findings", "");
+  [...o.findings].sort((a, b) => (SEV[a.severity] ?? 3) - (SEV[b.severity] ?? 3)).forEach((f) => L.push(`- **${f.severity}** · ${f.kind.replace(/_/g, " ")}: ${plain(f.detail)}`));
+  const gs = o.guardrails.filter((g) => g.priority === "high");
+  if (gs.length) { L.push("", "## High-priority guardrails", ""); gs.forEach((g) => L.push(`- ${plain(g.hop)}: ${g.kind} ${plain(g.value)}. ${plain(g.evidence)}`)); }
+  const steps = $$("#next-steps .step-main b").map((b) => b.textContent);
+  if (steps.length) { L.push("", "## Next steps", ""); steps.forEach((x, i) => L.push(`${i + 1}. ${x}`)); }
+  L.push("", "_Every number above is a query over the Faultline trace graph._");
+  return L.join("\n");
+}
+function mdLedger() {
+  const l = state.ledger || { experiments: [], fixes: [] }, inc = state.incidents || [];
+  const L = ["# Reliability ledger", "", `Link: ${location.href}`, "", "## Incidents", ""];
+  if (!inc.length) L.push("None against the current steady state.");
+  inc.forEach((i) => L.push(`- **${i.kind}** · ${i.endpoint} in ${i.label} (${i.window}): failed ${pct(i.fail_rate[0])} → ${pct(i.fail_rate[1])}, p95 ${fmt(i.p95_ms[0])} → ${fmt(i.p95_ms[1])} ms against ${winLabel(i.baseline)}.`
+    + (i.hop ? ` Where to look: ${plain(i.hop)}.` : "") + (i.worst_trace ? ` Worst request ${i.worst_trace.id} (${fmt(i.worst_trace.duration_ms)} ms).` : "")));
+  L.push("", "## Experiments", "");
+  if (!l.experiments.length) L.push("None yet.");
+  l.experiments.forEach((e) => L.push(`### ${e.verdict}: pause ${e.target} (${when(e.ts)})`, "", `- Hypothesis: ${e.hypothesis}`,
+    `- Observed: ${e.impact.map((x) => `${x.op}: ${pct(x.fail_rate)} failed, p50 ${fmt(x.p50_ms)} ms, ${x.failed_fast ? "failed fast" : "hung"}`).join("; ") || "nothing recorded"}`, `- Lesson: ${plain(e.lesson)}`, `- Windows: ${e.baseline} → ${e.observed}`, ""));
+  L.push("## Fixes", "");
+  if (!l.fixes.length) L.push("None yet.");
+  l.fixes.forEach((f) => { L.push(`### ${f.verdict}: \`${f.flags}\` on ${f.service} (${when(f.ts)})`, ""); f.gates.forEach((g) => L.push(`- [${g.passed ? "x" : " "}] ${plain(g.text).replace(/>=/g, "≥")}`)); L.push(`- Next owner: ${f.next_owner || "none"}`, `- Windows: ${f.before} → ${f.after}`, ""); });
+  return L.join("\n");
+}
+async function exportMd(build, what) {
+  if (!state.overview) return;
+  const text = build(), ok = await copyText(text);
+  toast(ok ? `Copied the ${what} as Markdown (${text.split("\n").length} lines). Paste it into the incident or review doc.` : "The browser blocked the clipboard.", ok ? "ok" : "bad");
+}
+$("#export-report").addEventListener("click", () => exportMd(mdReport, "window report"));
+$("#export-ledger").addEventListener("click", () => exportMd(mdLedger, "ledger"));
 
 boot().catch((e) => {
   document.body.classList.remove("loading");

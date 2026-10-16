@@ -27,8 +27,9 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
     wid = f"w-{uuid.uuid4().hex[:8]}"
     starts = [min(s["start_us"] for s in t["spans"]) for t in traces]
     ends = [max(s["start_us"] + s["duration_us"] for s in t["spans"]) for t in traces]
-    st.q("CREATE (:Window {id:$id, label:$label, start_us:$s, end_us:$e, traces:$n, created:$ts})",
-         {"id": wid, "label": label, "s": min(starts), "e": max(ends), "n": len(traces), "ts": time.time()})
+    st.q("CREATE (:Window {id:$id, label:$label, start_us:$s, end_us:$e, traces:$n, created:$ts, steady:$steady})",
+         {"id": wid, "label": label, "s": min(starts), "e": max(ends), "n": len(traces), "ts": time.time(),
+          "steady": not label.startswith("pause-")})  # a window recorded during a fault, or after a rejected fix, is not steady state
     progress(f"window {wid} ({label}): {len(traces)} traces")
 
     svc_edges: dict[tuple[str, str], list[dict]] = defaultdict(list)   # (caller svc, callee svc) -> child spans
@@ -108,7 +109,7 @@ def latest_window(st: Store, label: str | None = None, steady: bool = True) -> s
     if label:
         rows = st.q("MATCH (w:Window {label:$l}) RETURN w.id ORDER BY w.created DESC LIMIT 1", {"l": label})
     elif steady:
-        rows = st.q("MATCH (w:Window) WHERE NOT w.label STARTS WITH 'pause-' RETURN w.id ORDER BY w.created DESC LIMIT 1")
+        rows = st.q("MATCH (w:Window) WHERE NOT w.label STARTS WITH 'pause-' AND coalesce(w.steady, true) RETURN w.id ORDER BY w.created DESC LIMIT 1")
     else:
         rows = st.q("MATCH (w:Window) RETURN w.id ORDER BY w.created DESC LIMIT 1")
     if not rows:

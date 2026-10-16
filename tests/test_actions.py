@@ -129,3 +129,38 @@ def test_incident_issue_and_pr_proposals(st, tmp_path, monkeypatch):
     st.q("MATCH (b:Window {id:$b}), (a:Window {id:$a}), (s:Service {name:'customer'}) CREATE (f:Fix {id:'fix-t', service:'customer', flags:'-M', verdict:'VERIFIED', gates:['PASS x'], next_owner:'n', ts:1})-[:TARGETS]->(s) CREATE (f)-[:BEFORE]->(b) CREATE (f)-[:AFTER]->(a)", {"b": base_w, "a": bad_w})
     pr2 = actions.propose_pr(st, "fix-t"); r2 = actions.approve(st, pr2["action"])
     assert r2["ok"] and "deploy/docker-compose.fix.yml" in r2["files"] and "-M" in (tmp_path / r2["written"] / "deploy/docker-compose.fix.yml").read_text()
+
+
+def test_remedies_come_from_evidence_and_hypotheses_can_be_refuted(st):
+    w = ingest.latest_window(st, "baseline")
+    fan = analysis.serialized_fanout(st, w)
+    assert fan and fan[0]["hop"] == "frontend -> route" and fan[0]["max_concurrency"] <= 3 and fan[0]["rounds"] >= 2
+    rs = planner.remedies(st, w)
+    kinds = {(r["kind"], r["service"]) for r in rs}
+    assert ("serialized_fanout", "frontend") in kinds and ("per_call_cost", "mysql") in kinds
+    assert all(r["evidence"] and r["change"] for r in rs)
+    nf = planner.next_fix(st, w)
+    assert nf and nf["flags"] in (["-D", "100ms"], ["-W", "100"]) and nf["evidence"] and nf["kind"] in ("per_call_cost", "serialized_fanout")
+    h = experiments.hypothesis(st, w, "customer")
+    assert "driver" in h["starved"] and "route" in h["starved"] and h["keep_answering"] == []
+    h2 = experiments.hypothesis(st, w, "route")
+    assert set(h2["keep_answering"]) >= {"customer", "driver"} and h2["starved"] == []
+    assert "keep answering" in h2["text"] and "almost no calls" in h["text"]
+
+
+def test_contention_is_detected_from_in_flight_overlap(st):
+    """24 requests, four at a time, whose DB span grows by 250 ms per concurrent call: the signature of a lock."""
+    traces, t = [], 0
+    for batch in range(6):
+        for k in range(4):
+            start = t + k * 1000
+            db = 300_000 + 250_000 * k
+            traces.append({"id": f"c{batch}{k}", "spans": [
+                {"id": f"r{batch}{k}", "parent": None, "service": "frontend", "op": "GET /dispatch", "start_us": start, "duration_us": db + 2000, "kind": "server", "error": False, "status": "200", "attrs": {}},
+                {"id": f"d{batch}{k}", "parent": f"r{batch}{k}", "service": "mysql", "op": "SQL SELECT", "start_us": start + 1000, "duration_us": db, "kind": "internal", "error": False, "status": None, "attrs": {"db.system.name": "mysql"}}]})
+        t += 2_000_000
+    w = ingest.ingest_window(st, "synthetic", traces=traces, progress=lambda *_: None)["window"]
+    c = analysis.contention(st, w)
+    assert c and c[0]["service"] == "mysql" and c[0]["per_inflight_ms"] > 150 and c[0]["correlation"] > 0.8
+    r = planner.remedies(st, w)[0]
+    assert r["kind"] == "contention" and r["actuator"]["flags"] == ["-M"] and "per concurrent call" in r["evidence"]

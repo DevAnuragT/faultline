@@ -59,30 +59,58 @@ def st_edge_services() -> set[str]:
     return set(config.EDGE_SERVICES)
 
 
+def remedies(st: Store, window: str) -> list[dict]:
+    """What the graph says should change, as remedy classes with their evidence, ordered by the latency at stake.
+    Classes: contention (serialised work), serialized_fanout (calls limited to a few at a time), per_call_cost
+    (one expensive operation on the critical path), hang (no timeout; from experiments), retry_storm.
+    Each remedy is then matched to an actuator the environment provides (see experiments.ACTUATORS); a remedy
+    with no actuator is still reported, as advice, never invented as a command."""
+    from .experiments import ACTUATORS, OWNER_OF
+    owners = {analysis.label(o): o for o in analysis.critical_owners(st, window)}
+    by_service_op = {(o["service"], o["op"]): o for o in owners.values()}
+    out = []
+    for c in analysis.contention(st, window):
+        o = by_service_op.get((c["service"], c["op"]))
+        if o and o["share_pct"] >= 5:
+            out.append({"kind": "contention", "service": c["service"], "op": c["op"], "share_pct": o["share_pct"], "per_request_ms": o["per_request_ms"],
+                        "evidence": f"{c['op']} takes ~{c['alone_ms']:.0f} ms with nothing else in flight and ~{c['per_inflight_ms']:.0f} ms more per concurrent call, up to {c['crowded_ms']:.0f} ms with {c['inflight_high']} in flight ({c['ratio']}x, correlation {c['correlation']}, {c['spans']} spans)",
+                        "change": "stop serialising this work: remove the lock, or give it a pool"})
+    for f in analysis.serialized_fanout(st, window):
+        svc, peer = f["hop"].split(" -> ")
+        stake = sum(o["per_request_ms"] for o in owners.values() if o["service"] == peer)
+        share = sum(o["share_pct"] for o in owners.values() if o["service"] == peer)
+        if share >= 5:
+            out.append({"kind": "serialized_fanout", "service": svc, "op": f["hop"], "share_pct": round(share, 1), "per_request_ms": round(stake, 1),
+                        "evidence": f"{f['calls_per_request']:.0f} calls per request into {peer} run at most {f['max_concurrency']} at a time: {f['rounds']} rounds of ~{f['per_call_ms']:.0f} ms",
+                        "change": "raise the caller's concurrency for this hop, or batch the calls"})
+    taken = {(r["service"], r["op"]) for r in out}
+    for o in owners.values():
+        if o["share_pct"] >= 15 and (o["service"], o["op"]) not in taken and not o.get("peer"):
+            out.append({"kind": "per_call_cost", "service": o["service"], "op": o["op"], "share_pct": o["share_pct"], "per_request_ms": o["per_request_ms"],
+                        "evidence": f"{analysis.label(o)} owns {o['share_pct']}% of latency at {o['per_request_ms']:.0f} ms per request and is not contended",
+                        "change": "make each call cheaper: an index, a cache, or a smaller query"})
+    for r in out:
+        owner_svc = OWNER_OF.get(r["service"], r["service"])
+        act = ACTUATORS.get((r["kind"], r["service"])) or ACTUATORS.get((r["kind"], owner_svc))
+        r["actuator"] = {"flags": act["flags"], "service": act["service"], "what": act["what"]} if act else None
+    return sorted(out, key=lambda r: -r["per_request_ms"])
+
+
 def next_fix(st: Store, window: str) -> dict | None:
-    """Map the top critical-path owner to the fix HotROD exposes for it; the agent proposes it, a human approves."""
-    from .experiments import FIX_FLAGS, OWNER_OF
+    """The first remedy that has an actuator in this environment and has not already been VERIFIED."""
     _, applied = st.ro("MATCH (f:Fix) RETURN f.flags, f.verdict, f.gates ORDER BY f.ts")
     used = {row[0].split()[0] for row in applied if row[1] == "VERIFIED"}
     previous = {row[0].split()[0]: {"verdict": row[1], "failed_gates": [g for g in row[2] if g.startswith("FAIL")]} for row in applied}
-    owners = analysis.critical_owners(st, window)
-    top = owners[0] if owners else None
-    for o in owners:
-        if o["share_pct"] < 5:
-            break
-        svc = OWNER_OF.get(o["service"], o["service"])
-        for flag, (target, why) in (("-M", FIX_FLAGS["-M"]), ("-D 100ms", FIX_FLAGS["-D"]), ("-W 100", FIX_FLAGS["-W"])):
-            base = flag.split()[0]
-            if target != svc or base in used:
-                continue
-            if base == "-W" and o["service"] not in ("route", "frontend"):
-                continue
-            if base in ("-M", "-D") and o["service"] != "mysql":
-                continue
-            return {"flags": flag.split(), "service": target, "targets_owner": analysis.label(o), "share_pct": o["share_pct"],
-                    "per_request_ms": o["per_request_ms"], "why": why, "previous_attempt": previous.get(base),
-                    "note": None if o is top else f"no known knob targets the top owner {analysis.label(top)} ({top['share_pct']}%); "
-                                                   f"this is the next owner with a knob"}
+    rs = remedies(st, window)
+    top = rs[0] if rs else None
+    for r in rs:
+        a = r.get("actuator")
+        if not a or a["flags"][0] in used:
+            continue
+        return {"flags": a["flags"], "service": a["service"], "targets_owner": f"{r['service']} {r['op']}", "share_pct": r["share_pct"],
+                "per_request_ms": r["per_request_ms"], "kind": r["kind"], "evidence": r["evidence"], "change": r["change"], "why": a["what"],
+                "previous_attempt": previous.get(a["flags"][0]),
+                "note": None if r is top else f"the top remedy ({top['kind']} in {top['service']} {top['op']}, {top['share_pct']}%) has no actuator here; this is the next one that does"}
     return None
 
 

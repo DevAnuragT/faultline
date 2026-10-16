@@ -43,8 +43,16 @@ make run         # the site on http://localhost:8600: findings, experiments, age
 ```
 
 **How it decides.** Critical paths (CRISP) say who owns the latency. Betweenness and reverse reachability say who is a
-single point of failure and what breaks if it stops: that prediction is the hypothesis of a chaos experiment, and the
-observed window confirms or refutes it. Fixes are judged by gates between two windows and rolled back if rejected.
+single point of failure and what breaks if it stops. The hypothesis of a chaos experiment has three checkable parts: which
+operations fail, which services keep answering (called before the target in the request's measured call order), and which
+are starved (only called after it). Each part can be refuted by the observed window. Fixes are judged by gates between two
+windows and rolled back if rejected, including on errors.
+
+**Remedies, not knobs.** The graph names a remedy class from evidence it can show: *contention* (an operation gets slower the
+more of it is in flight), *serialized fan-out* (ten calls per request run three at a time), *per-call cost* (one expensive
+operation on the critical path), *hang* (an experiment showed no timeout), *retry storm*. The environment supplies the
+actuator for each class, if it has one: here HotROD's flags, in production a feature flag, a pool size or a Helm value
+(`experiments.ACTUATORS`). A remedy without an actuator is still reported as advice; nothing is invented as a command.
 The experiment planner ranks targets the way Netflix's Monocle did (criticality × safety, recency, review gate), with
 the experiment ledger in the graph as its memory. The agent (Gemini, tool-calling) only reads the graph and proposes;
 a human approves; approval is bound to a hash of the evidence.

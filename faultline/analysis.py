@@ -176,7 +176,7 @@ def incident(st: Store, window: str, baseline: str | None = None) -> dict | None
     Returns the write-up material: endpoint, numbers, the owner that moved, the worst trace, the hop to look at."""
     if baseline is None:  # the steady-state window that preceded this one; the first window has nothing to regress from
         rows = st.q("""MATCH (w:Window {id:$w}) MATCH (b:Window) WHERE b.created < w.created AND NOT b.label STARTS WITH 'pause-'
-                       RETURN b.id ORDER BY b.created DESC LIMIT 1""", {"w": window})
+                       AND coalesce(b.steady, true) RETURN b.id ORDER BY b.created DESC LIMIT 1""", {"w": window})
         if not rows:
             return None
         baseline = rows[0][0]
@@ -217,6 +217,69 @@ def incidents(st: Store) -> list[dict]:
         if inc:
             out.append(inc)
     return out
+
+
+def _median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    return xs[len(xs) // 2] if xs else 0.0
+
+
+def contention(st: Store, window: str, min_spans: int = 20) -> list[dict]:
+    """Lock or pool contention: an operation whose spans get slower the more of them are in flight at once.
+    For every span count how many same-operation spans had started and not finished when it began, bucket by that
+    count, and compare the least-crowded bucket with the most-crowded one. Evidence a judge can check in the waterfall."""
+    _, rows = st.ro("MATCH (s:Span {window:$w}) RETURN s.service, s.op, s.start_us, s.duration_us ORDER BY s.start_us", {"w": window})
+    by_op: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for svc, op, start, dur in rows:
+        by_op.setdefault((svc, op), []).append((start, dur))
+    out = []
+    for (svc, op), spans in by_op.items():
+        if len(spans) < min_spans:
+            continue
+        buckets: dict[int, list[float]] = {}
+        for i, (start, dur) in enumerate(spans):
+            inflight = sum(1 for s2, d2 in spans[max(0, i - 50):i] if s2 + d2 > start)
+            buckets.setdefault(inflight, []).append(dur / 1000)
+        xs = [k for k, v in buckets.items() for _ in v]; ys = [d for k, v in buckets.items() for d in v]
+        if len(set(xs)) < 2:
+            continue
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys)); vx = sum((x - mx) ** 2 for x in xs); vy = sum((y - my) ** 2 for y in ys)
+        corr = cov / ((vx * vy) ** 0.5) if vx and vy else 0.0
+        slope = cov / vx if vx else 0.0            # ms added per extra span in flight
+        alone = my - slope * mx                    # estimated duration with nothing else in flight
+        hi = max(xs)
+        if alone > 0 and slope >= 0.5 * alone and corr >= 0.4:
+            out.append({"service": svc, "op": op, "alone_ms": round(alone, 1), "crowded_ms": round(alone + slope * hi, 1),
+                        "ratio": round((alone + slope * hi) / alone, 2), "inflight_low": 0, "inflight_high": hi,
+                        "per_inflight_ms": round(slope, 1), "correlation": round(corr, 2), "spans": len(spans)})
+    return sorted(out, key=lambda r: -r["ratio"])
+
+
+def serialized_fanout(st: Store, window: str, min_calls: float = 3.0) -> list[dict]:
+    """A hop that fans out into many calls per request but runs them only a few at a time: the request pays for
+    rounds of serialized calls. Measured as max concurrency of the hop's client spans within a trace."""
+    _, rows = st.ro("""MATCH (c:Span {window:$w, kind:'client'}) WHERE c.peer <> ''
+                       RETURN c.trace, c.service, c.peer, c.start_us, c.duration_us ORDER BY c.trace, c.start_us""", {"w": window})
+    per_trace: dict[tuple[str, str, str], list[tuple[int, int]]] = {}
+    for trace, svc, peer, start, dur in rows:
+        per_trace.setdefault((trace, svc, peer), []).append((start, dur))
+    hops: dict[tuple[str, str], list[tuple[int, int, float]]] = {}
+    for (trace, svc, peer), spans in per_trace.items():
+        if len(spans) < min_calls:
+            continue
+        events = sorted([(s, 1) for s, _ in spans] + [(s + d, -1) for s, d in spans])
+        cur = peak = 0
+        for _, delta in events:
+            cur += delta; peak = max(peak, cur)
+        hops.setdefault((svc, peer), []).append((len(spans), peak, _median([d / 1000 for _, d in spans])))
+    out = []
+    for (svc, peer), xs in hops.items():
+        calls = _median([c for c, _, _ in xs]); peak = _median([p for _, p, _ in xs]); per_call = _median([m for _, _, m in xs])
+        if calls >= min_calls and peak <= calls / 2:
+            out.append({"hop": f"{svc} -> {peer}", "calls_per_request": round(calls, 1), "max_concurrency": int(peak),
+                        "rounds": int(-(-calls // max(peak, 1))), "per_call_ms": round(per_call, 1), "traces": len(xs)})
+    return sorted(out, key=lambda r: -r["rounds"])
 
 
 def findings(st: Store, window: str) -> list[dict]:

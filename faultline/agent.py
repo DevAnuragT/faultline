@@ -17,7 +17,8 @@ Rules:
   observed window; a fix is VERIFIED/REJECTED by its gates. Never upgrade a REJECTED or REFUTED result in prose.
 - When asked what is wrong / what is slow / what is risky: call overview, then explain_critical_path for the main
   endpoint, and cite the owners by share and ms per request.
-- When asked what to fix or improve: call overview, then next_fix and rank_experiments. Then you MUST call
+- When asked what to fix or improve: call overview, then remedies and next_fix (quote the evidence sentence: the remedy
+  comes from measured contention, serialized fan-out or per-call cost, never from a list of knobs), and rank_experiments. Then you MUST call
   propose_fix (with the flags next_fix returned) or propose_experiment (with the top-ranked target) before answering:
   a recommendation without a proposal is incomplete. Nothing runs until a human approves it in the Actions tab: say
   "proposed" (never "applied", "ran" or "started") and give the action id the tool returned. After a fix is VERIFIED,
@@ -84,9 +85,18 @@ class Toolbox:
         self._log("rank_experiments", {"window": w}, res)
         return res
 
+    def remedies(self, window: str = "") -> list[dict]:
+        """What the graph says should change, as remedy classes with evidence: contention (an operation slows as more of
+        it is in flight), serialized_fanout (many calls per request run a few at a time), per_call_cost (one expensive
+        operation on the critical path). Each carries the actuator this environment has for it, or null (advice only)."""
+        w = self._w(window or None)
+        res = planner.remedies(self.st, w)
+        self._log("remedies", {"window": w}, res)
+        return res
+
     def next_fix(self, window: str = "") -> dict:
-        """The fix the graph points at: the top critical-path owner mapped to the configuration knob that targets it,
-        skipping fixes already VERIFIED. Returns null when no known knob targets the current owner."""
+        """The first remedy that has an actuator here and is not already VERIFIED: the remedy class, its evidence sentence,
+        the change in plain words, and the flags to pass to propose_fix. Returns a note when none applies."""
         w = self._w(window or None)
         res = planner.next_fix(self.st, w) or {"note": "no known knob targets the current top owner"}
         self._log("next_fix", {"window": w}, res)
@@ -214,7 +224,7 @@ class Toolbox:
         return wrapped
 
     def _raw_tools(self) -> list:
-        return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.next_fix, self.guardrails,
+        return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.remedies, self.next_fix, self.guardrails,
                 self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.propose_guardrail, self.incidents, self.code_pointer, self.propose_incident_issue, self.propose_pr, self.query_graph]
 
 
@@ -287,6 +297,7 @@ class Agent:
                 prev = nf.get("previous_attempt")
                 return (f"Top owner: {analysis.label(top)} at {top['share_pct']}% ({top['per_request_ms']} ms/request). "
                         + (f"{nf['note']}. " if nf.get("note") else "")
+                        + f"Remedy: {nf['kind'].replace('_', ' ')}: {nf['evidence']}. Change: {nf['change']}. "
                         + f"Proposed `{' '.join(nf['flags'])}` on {nf['service']} (targets {nf['targets_owner']}, {nf['share_pct']}%): "
                         f"action {p.get('action')} awaiting approval."
                         + (f" Note: a previous attempt was {prev['verdict']}" + (f" on: {'; '.join(prev['failed_gates'])}" if prev["failed_gates"] else "") + "." if prev else ""))

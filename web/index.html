@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="styles.css?v=tour1d">
+<link rel="stylesheet" href="styles.css?v=sre1d">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151c'/%3E%3Cpath d='M6 21 L12.5 11 L17.5 18 L21.5 13 L26 21' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 </head>
@@ -31,6 +31,12 @@
   <symbol id="i-play" viewBox="0 0 20 20"><path d="M6.5 4.5l9 5.5-9 5.5z"/></symbol>
   <symbol id="i-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M7.9 7.9a2.15 2.15 0 0 1 4.15.75c0 1.45-2.05 1.9-2.05 3.1M10 14.2h.01" stroke-width="1.8"/></symbol>
   <symbol id="i-close" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></symbol>
+  <symbol id="i-link" viewBox="0 0 20 20"><path d="M8.5 11.5a3 3 0 0 0 4.24 0l2.83-2.83a3 3 0 0 0-4.24-4.24l-.9.9M11.5 8.5a3 3 0 0 0-4.24 0l-2.83 2.83a3 3 0 0 0 4.24 4.24l.9-.9"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 20 20"><path d="M3.5 5h13M3.5 8.5h13M3.5 12h13M3.5 15.5h13"/></symbol>
+  <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.75" cy="8.75" r="5"/><path d="M12.5 12.5l4 4"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 20 20"><path d="M5.5 2.75h6l3.5 3.5v11h-9.5z"/><path d="M11.5 2.75v3.5H15M7.75 10.5h4.5M7.75 13.5h4.5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="1.5"/><path d="M13 7V4.75A1.25 1.25 0 0 0 11.75 3.5h-7A1.25 1.25 0 0 0 3.5 4.75v7A1.25 1.25 0 0 0 4.75 13H7"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 20 20"><rect x="2.5" y="5" width="15" height="10" rx="1.5"/><path d="M5.5 8h.01M8.5 8h.01M11.5 8h.01M14.5 8h.01M6.5 12h7" stroke-width="1.8"/></symbol>
 </svg>
 
 <div class="app">
@@ -48,6 +54,7 @@
       <a href="#graph" data-view="graph"><svg class="ico" aria-hidden="true"><use href="#i-graph"/></svg><span>Graph</span></a>
     </nav>
     <div class="rail-foot">
+      <button class="rail-kbd" id="shortcuts-btn" type="button"><svg class="ico" aria-hidden="true"><use href="#i-keyboard"/></svg>Keyboard shortcuts <kbd>?</kbd></button>
       <p class="loop"><span>Observe</span><span>Experiment</span><span>Fix</span><span>Verify</span></p>
       <p>The graph decides what to break and what to fix. A person approves. The system is changed and measured again.</p>
     </div>
@@ -65,16 +72,20 @@
         <span class="chip" title="FalkorDB graph this console reads"><svg class="ico" aria-hidden="true"><use href="#i-db"/></svg><span class="k">graph</span><span id="meta-graph"></span></span>
         <span class="chip" title="Model behind the Agent view"><svg class="ico" aria-hidden="true"><use href="#i-spark"/></svg><span class="k">model</span><span id="meta-model"></span></span>
         <span class="chip warn" id="meta-public" title="Proposing and approving are turned off in this public demo" hidden><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>Read-only demo</span>
+        <button class="icon-btn" id="copy-link" type="button" aria-label="Copy a link to this view" title="Copy a link to this view (y)"><svg class="ico" aria-hidden="true"><use href="#i-link"/></svg></button>
+        <button class="icon-btn" id="density" type="button" aria-pressed="false" aria-label="Compact rows" title="Compact rows (d)"><svg class="ico" aria-hidden="true"><use href="#i-rows"/></svg></button>
         <button class="icon-btn" id="tour-btn" type="button" data-tour-start aria-label="Take the tour of this console" title="Take the tour"><svg class="ico" aria-hidden="true"><use href="#i-help"/></svg></button>
         <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark theme" title="Switch theme"><svg class="ico" aria-hidden="true"><use href="#i-theme"/></svg></button>
       </div>
     </header>
 
+    <section class="statusbar" id="status" aria-label="Health of the selected window against its baseline" aria-live="polite"><span class="skel short"></span></section>
+
     <section class="kpis" id="strip" aria-label="Selected window at a glance">
       <div class="kpi"><span class="lbl">Endpoint</span><span class="val" id="s-op">—</span><span class="sub" id="s-traces"></span></div>
-      <div class="kpi"><span class="lbl">Median · p50</span><span class="val num"><span id="s-p50">—</span><small>ms</small></span><span class="sub">middle request</span></div>
-      <div class="kpi"><span class="lbl">Tail · p95</span><span class="val num"><span id="s-p95">—</span><small>ms</small></span><span class="sub" id="s-tail">slowest 1 in 20</span></div>
-      <div class="kpi" id="k-failed"><span class="lbl">Failed</span><span class="val num" id="s-failrate">—</span><span class="sub" id="s-failed"></span></div>
+      <div class="kpi"><span class="lbl">Median · p50</span><span class="val num"><span id="s-p50">—</span><small>ms</small><span class="kdelta" id="d-p50"></span></span><span class="sub">middle request</span></div>
+      <div class="kpi"><span class="lbl">Tail · p95</span><span class="val num"><span id="s-p95">—</span><small>ms</small><span class="kdelta" id="d-p95"></span></span><span class="sub" id="s-tail">slowest 1 in 20</span></div>
+      <div class="kpi" id="k-failed"><span class="lbl">Failed</span><span class="val num"><span id="s-failrate">—</span><span class="kdelta" id="d-fail"></span></span><span class="sub" id="s-failed"></span></div>
       <div class="kpi owner"><span class="lbl">Owns the latency</span><span class="val" id="s-owner">—</span><span class="meter" aria-hidden="true"><i id="s-owner-bar"></i></span><span class="sub" id="s-owner-share"></span></div>
     </section>
 
@@ -84,6 +95,7 @@
         <header class="view-head">
           <h2 id="t-findings">Findings</h2>
           <p>Where the selected window spends its time, what fails, and which guardrails the graph recommends.</p>
+          <div class="vh-actions"><button class="btn small" type="button" id="export-report" title="Copy this window's report as Markdown for an incident doc"><svg class="ico" aria-hidden="true"><use href="#i-doc"/></svg>Copy report as Markdown</button></div>
         </header>
         <section class="starter" id="start-here" aria-labelledby="start-title" hidden>
           <div class="starter-intro">
@@ -99,6 +111,14 @@
           </ol>
           <button class="icon-btn starter-close" id="start-dismiss" type="button" aria-label="Dismiss the Start here card" title="Dismiss"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
         </section>
+        <article class="panel" id="next-panel">
+          <div class="panel-head">
+            <div class="ttl"><h3>Next steps</h3><p class="sub">The actions the graph supports for this window, most urgent first. Each one becomes a proposal that waits in Approvals.</p></div>
+            <span class="head-meta" id="next-count"></span>
+          </div>
+          <ol class="next-steps bleed" id="next-steps"><li class="skel-row"><span class="skel"></span></li></ol>
+        </article>
+
         <div class="grid g-split">
           <article class="panel graph-panel">
             <div class="panel-head">
@@ -114,7 +134,7 @@
               <button class="info" type="button" aria-label="How ownership is measured" data-help="owners-method"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
             </div>
             <div class="table-wrap bleed">
-              <table class="owners" id="owners"><thead><tr><th class="num rank">#</th><th>Owner</th><th>Share</th><th class="num">ms / req</th></tr></thead>
+              <table class="owners" id="owners"><thead><tr><th class="num rank" data-sort="num">#</th><th data-sort="text">Owner</th><th data-sort="num">Share</th><th class="num" data-sort="num">ms / req</th></tr></thead>
                 <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
             </div>
           </article>
@@ -136,7 +156,7 @@
             <button class="info" type="button" aria-label="How guardrails are chosen" data-help="guardrails"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
           </div>
           <div class="table-wrap bleed">
-            <table id="guardrails" class="stack"><thead><tr><th>Hop</th><th>Kind</th><th>Value</th><th>Evidence</th><th class="act"><span class="sr-only">Action</span></th></tr></thead><tbody></tbody></table>
+            <table id="guardrails" class="stack"><thead><tr><th data-sort="text">Hop</th><th data-sort="text">Kind</th><th data-sort="num">Value</th><th>Evidence</th><th class="act"><span class="sr-only">Action</span></th></tr></thead><tbody></tbody></table>
           </div>
         </article>
 
@@ -161,8 +181,17 @@
       <section class="view" id="view-trace" aria-labelledby="t-trace" hidden>
         <header class="view-head">
           <h2 id="t-trace">Trace</h2>
-          <p>The slowest steady-state request in this window, span by span, with the chain it actually waited on.</p>
+          <p>The slowest steady-state request in this window, span by span, with the chain it actually waited on. Open any other request by id.</p>
         </header>
+        <div class="trace-bar">
+          <form id="trace-form" class="trace-search" role="search">
+            <label class="sr-only" for="trace-q">Trace id</label>
+            <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+            <input id="trace-q" type="text" placeholder="Open a trace by id" autocomplete="off" spellcheck="false">
+            <button class="btn small" type="submit">Open trace</button>
+          </form>
+          <p class="trace-mode" id="trace-mode"></p>
+        </div>
         <article class="panel">
           <div class="panel-head">
             <div class="ttl"><h3>Slowest steady-state request</h3><p class="sub meta-row" id="trace-meta"><span class="skel short"></span></p></div>
@@ -170,13 +199,22 @@
           </div>
           <div class="waterfall-wrap bleed"><svg id="waterfall" role="img" aria-label="Trace waterfall"></svg></div>
         </article>
-        <article class="panel">
-          <div class="panel-head"><div class="ttl"><h3>Critical chain</h3><p class="sub">Top-down: the spans this request waited on. Self time is the time spent in the span itself.</p></div></div>
-          <div class="table-wrap bleed">
-            <table id="chain" class="wide"><thead><tr><th>Service</th><th>Operation</th><th>Waits on</th><th class="num">span ms</th><th class="num">self ms</th></tr></thead>
-              <tbody><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr></tbody></table>
-          </div>
-        </article>
+        <div class="grid g-split">
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Critical chain</h3><p class="sub">Top-down: the spans this request waited on. Self time is the time spent in the span itself.</p></div></div>
+            <div class="table-wrap bleed">
+              <table id="chain" class="wide"><thead><tr><th>Service</th><th>Operation</th><th>Waits on</th><th class="num">span ms</th><th class="num">self ms</th></tr></thead>
+                <tbody><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="5"><span class="skel"></span></td></tr></tbody></table>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div class="ttl"><h3>Slowest requests</h3><p class="sub">The ten slowest requests in this window. Open one to see its waterfall.</p></div></div>
+            <div class="table-wrap bleed">
+              <table id="trace-list"><thead><tr><th>Trace</th><th class="num">ms</th><th>Status</th><th class="act"><span class="sr-only">Open</span></th></tr></thead>
+                <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
+            </div>
+          </article>
+        </div>
       </section>
 
       <!-- ============ Experiments ============ -->
@@ -184,6 +222,7 @@
         <header class="view-head">
           <h2 id="t-experiments">Experiments</h2>
           <p>What to break next, what to fix next, and the ledger of everything already tried. Proposals wait in Approvals.</p>
+          <div class="vh-actions"><button class="btn small" type="button" id="export-ledger" title="Copy incidents, experiments and fixes as Markdown for a review doc"><svg class="ico" aria-hidden="true"><use href="#i-doc"/></svg>Copy ledger as Markdown</button></div>
         </header>
 
         <div class="section-label"><h3>Next steps</h3></div>
@@ -194,7 +233,7 @@
               <button class="info" type="button" aria-label="How targets are ranked" data-help="planner"><svg class="ico" aria-hidden="true"><use href="#i-info"/></svg></button>
             </div>
             <div class="table-wrap bleed">
-              <table id="planner" class="stack"><thead><tr><th>Target</th><th>Priority</th><th>Why</th><th class="act"><span class="sr-only">Action</span></th></tr></thead>
+              <table id="planner" class="stack"><thead><tr><th data-sort="text">Target</th><th data-sort="num">Priority</th><th>Why</th><th class="act"><span class="sr-only">Action</span></th></tr></thead>
                 <tbody><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr><tr class="skel-row"><td colspan="4"><span class="skel"></span></td></tr></tbody></table>
             </div>
           </article>
@@ -206,7 +245,7 @@
 
         <article class="panel">
           <div class="panel-head">
-            <div class="ttl"><h4>Compare windows</h4><p class="sub">Pick two <dfn class="term" tabindex="0" data-help="window">windows</dfn> to see what moved. Lower is better for every row.</p></div>
+            <div class="ttl"><h4>Compare windows</h4><p class="sub">Pick two <dfn class="term" tabindex="0" data-help="window">windows</dfn> to see what moved. Defaults to the selected window against its baseline. Lower is better for every row.</p></div>
             <div class="compare-pick">
               <label class="sr-only" for="cmp-a">Before</label><select id="cmp-a"></select>
               <span class="arrow" aria-hidden="true">→</span>
@@ -308,7 +347,23 @@
 </div>
 <div id="tip" class="tip" role="tooltip" hidden></div>
 <div id="help" class="help-tip" role="tooltip" hidden></div>
+<dialog id="shortcuts" class="sheet" aria-labelledby="sc-title">
+  <div class="sheet-head"><h2 id="sc-title">Keyboard shortcuts</h2><button class="icon-btn" type="button" data-close aria-label="Close keyboard shortcuts"><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+  <div class="sc-grid">
+    <section><h3>Go to</h3><dl>
+      <dt><kbd>g</kbd><kbd>f</kbd></dt><dd>Findings</dd><dt><kbd>g</kbd><kbd>t</kbd></dt><dd>Trace</dd><dt><kbd>g</kbd><kbd>e</kbd></dt><dd>Experiments</dd>
+      <dt><kbd>g</kbd><kbd>a</kbd></dt><dd>Agent</dd><dt><kbd>g</kbd><kbd>p</kbd></dt><dd>Approvals</dd><dt><kbd>g</kbd><kbd>g</kbd></dt><dd>Graph</dd>
+    </dl></section>
+    <section><h3>Window</h3><dl>
+      <dt><kbd>w</kbd></dt><dd>Pick a window</dd><dt><kbd>[</kbd><kbd>]</kbd></dt><dd>Previous or next window</dd>
+    </dl><h3>Anywhere</h3><dl>
+      <dt><kbd>/</kbd></dt><dd>Ask the agent</dd><dt><kbd>y</kbd></dt><dd>Copy a link to this view</dd><dt><kbd>d</kbd></dt><dd>Compact or comfortable rows</dd>
+      <dt><kbd>?</kbd></dt><dd>Show this list</dd><dt><kbd>Esc</kbd></dt><dd>Close, or leave a field</dd>
+    </dl></section>
+  </div>
+  <div class="sheet-foot"><span class="hint">Links keep the view, the window and the open trace, so they can be pasted into an incident channel.</span><button class="btn small" type="button" data-tour-start>Take the tour</button></div>
+</dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-<script src="app.js?v=tour1d"></script>
+<script src="app.js?v=sre1d"></script>
 </body>
 </html>

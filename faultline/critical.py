@@ -24,9 +24,10 @@ def critical_path(spans: list[dict]) -> tuple[list[str], dict[str, int]]:
     def end(s: dict) -> int:
         return s["start_us"] + s["duration_us"]
 
-    def walk(span: dict) -> None:
+    def walk(span: dict, limit_end: int | None = None) -> None:
         path.append(span["id"])
-        parent_end = end(span)
+        parent_end = min(end(span), limit_end) if limit_end is not None else end(span)
+        own = parent_end - span["start_us"]  # the span's duration as seen by its parent (clamped)
         frontier = parent_end
         chosen: list[tuple[dict, int]] = []
         # A child may end after its parent (a cancelled call whose client span closes late): clamp it to the parent's end
@@ -36,9 +37,9 @@ def critical_path(spans: list[dict]) -> tuple[list[str], dict[str, int]]:
             if ce <= frontier and c["start_us"] >= span["start_us"] and ce > c["start_us"]:
                 chosen.append((c, ce - c["start_us"]))
                 frontier = c["start_us"]
-        self_us[span["id"]] = max(span["duration_us"] - sum(d for _, d in chosen), 0)
+        self_us[span["id"]] = max(own - sum(d for _, d in chosen), 0)
         for c, _ in chosen:
-            walk(c)
+            walk(c, parent_end)
 
     walk(root)
     return path, self_us

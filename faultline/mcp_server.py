@@ -46,6 +46,12 @@ def rank_experiments(window: str = "") -> list[dict]:
 
 
 @mcp.tool()
+def remedies(window: str = "") -> list[dict]:
+    """Remedy classes the graph derives from evidence (contention, serialized fan-out, per-call cost) with actuators."""
+    return box().remedies(window)
+
+
+@mcp.tool()
 def next_fix(window: str = "") -> dict:
     """The knob that targets the top critical-path owner, with previous attempts."""
     return box().next_fix(window)

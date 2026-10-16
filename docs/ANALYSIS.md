@@ -163,6 +163,16 @@ incident report), **incident issues** for any window that regressed against stea
 moved, hop, code pointer, worst trace), and **code pointers** from OpenTelemetry code attributes with an explicit source map
 for HotROD. The agent's offline path and the site expose all three.
 
+**Review response (Oct 16, late).** An independent review raised four points; all four are fixed and tested.
+(1) Fixes looked like HotROD's three built-in knobs: now the graph produces *remedy classes* from evidence
+(`analysis.contention`, `analysis.serialized_fanout`, per-call cost on the critical path) and the environment maps a class
+to an actuator (`experiments.ACTUATORS`); the agent's `next_fix` carries the evidence sentence. (2) The pause prediction
+could not fail because HotROD has one endpoint: the hypothesis now also predicts which services keep answering and which
+are starved, from the baseline's measured call order, and each part is checked against the experiment window, so a
+verdict can be REFUTED. (3) A child span outliving its parent was credited beyond the parent's end: self times along the
+critical path now sum exactly to the root's duration. (4) Rollback now runs on errors too, and a rejected fix's window is
+flagged `steady:false` so it never becomes the steady state.
+
 Measured chain on Oct 16: `-M` VERIFIED (p50 1191 → 788 ms), `-W 100` VERIFIED (788 → 593 ms), agent-proposed
 `-D 100ms` (593 → 390 ms) first REJECTED by a strict failure gate on one flaky request out of 40, which led to the
 one-request tolerance and the automatic rollback. After each fix the graph names the next owner (MySQL → route queueing

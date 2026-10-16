@@ -37,4 +37,5 @@ def test_child_ending_after_parent_still_owns_the_wait():
     spans = [span("root", None, 0, 35000), span("hung", "root", 100, 35400)]
     path, self_us = critical_path(spans)
     assert set(path) == {"root", "hung"}
-    assert self_us["root"] == 100 and self_us["hung"] == 35400
+    assert self_us["root"] == 100 and self_us["hung"] == 34900, "the child owns the wait, but never time beyond the parent's end"
+    assert sum(self_us.values()) == 35000, "critical self times sum to the root duration"
