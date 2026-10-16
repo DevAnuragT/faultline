@@ -1,0 +1,1 @@
+["Sphinx ; extra == 'docs'", "objgraph ; extra == 'test'", "psutil ; extra == 'test'"]

@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 from pyvis.network import Network
 
-from reachable import actions, analysis, config, frozen, ingest, planner, verify
+from reachable import actions, analysis, config, frozen, ingest, planner, targets, verify
 from reachable.agent import Agent
 from reachable.graph import Store
 
@@ -18,14 +18,14 @@ KIND_STYLE = {"CALLS": "exact call", "MAYBE_CALLS": "name-guess call", "REFERENC
 
 
 @st.cache_resource
-def store() -> Store:
-    return Store()
+def store(graph: str) -> Store:
+    return Store(graph)
 
 
-def ensure_graph(s: Store) -> None:
+def ensure_graph(s: Store, target: targets.Target) -> None:
     if not s.exists():
         with st.status("First run: building the graph (call graph, advisories, symbol mapping)...", expanded=True) as status:
-            ingest.full_ingest(s, progress=lambda m: status.write(m))
+            ingest.full_ingest(s, progress=lambda m: status.write(m), target=target)
             analysis.triage(s)
             status.update(label="Graph ready", state="complete")
     elif not analysis.latest_findings(s):
@@ -79,14 +79,17 @@ GATE_ICON = {True: "✅", False: "❌"}
 STATUS_STYLE = {"VERIFIED": ("success", "✅ VERIFIED"), "REJECTED": ("error", "⛔ REJECTED"), "UNVERIFIED": ("warning", "⚠️ UNVERIFIED")}
 
 
-def render_fix_tab(s: Store, public: bool) -> None:
+def render_fix_tab(s: Store, public: bool, live_ok: bool = True) -> None:
     st.caption("The agent plans a compatible upgrade, rebuilds the graph with the candidate versions in a private scratch "
                "graph, re-triages, and only a VERIFIED result can become a pull request. Say 'graph-checked', not 'secure'.")
     rem = verify.latest_remediation(s)
     live = st.session_state.get("live_rem")
     if public:
         c1, c2 = st.columns(2)
-        if c1.button("Plan & verify a fix now (live, in a private scratch graph)", width="stretch"):
+        if not live_ok:
+            c1.caption("Live verification is limited to the demo app here (a real repo needs minutes to rebuild). "
+                       "The operator's recorded run is shown.")
+        elif c1.button("Plan & verify a fix now (live, in a private scratch graph)", width="stretch"):
             try:
                 with st.status("Planning and verifying in a scratch graph (about 15 seconds)...", expanded=True) as status:
                     st.session_state.live_rem = verify.run_closed_loop_ephemeral(s, progress=status.write)
@@ -167,9 +170,31 @@ def network_probe(host: str, port: int) -> str:
     return "\n".join(lines)
 
 
+def pick_target() -> targets.Target:
+    """Sidebar target switch. Public visitors only see targets whose graph was seeded by the operator."""
+    names = list(targets.TARGETS)
+    if config.PUBLIC_MODE:
+        ready = []
+        for n in names:
+            try:
+                if store(targets.TARGETS[n].graph).exists():
+                    ready.append(n)
+            except Exception:
+                pass
+        names = ready or [targets.DEFAULT]
+    default = config.TARGET if config.TARGET in names else names[0]
+    if len(names) == 1:
+        return targets.get(names[0])
+    with st.sidebar:
+        choice = st.selectbox("Analyze", names, index=names.index(default), key="target",
+                              format_func=lambda n: targets.TARGETS[n].label)
+    return targets.get(choice)
+
+
 def main() -> None:
     try:
-        s = store()
+        tgt = pick_target()
+        s = store(tgt.graph)
         s.q("RETURN 1")
     except Exception as exc:
         st.error(f"Cannot connect to FalkorDB at {config.FALKORDB_HOST}:{config.FALKORDB_PORT} "
@@ -183,11 +208,14 @@ def main() -> None:
             st.code(network_probe(config.FALKORDB_HOST, config.FALKORDB_PORT), language="text")
         store.clear()
         return
-    ensure_graph(s)
-    if "agent" not in st.session_state:
+    ensure_graph(s, tgt)
+    if st.session_state.get("agent_target") != tgt.name:  # new session or the visitor switched targets
+        st.session_state.agent_target = tgt.name
         st.session_state.agent = Agent(s)
         st.session_state.chat = []
-        st.session_state.recorded = frozen.load_agent()
+        st.session_state.live_rem = None
+        st.session_state.diff = None
+        st.session_state.recorded = frozen.load_agent() if tgt.name == targets.DEFAULT else None
         if st.session_state.recorded:  # show the agent working before the visitor types anything
             for t in st.session_state.recorded["turns"]:
                 st.session_state.chat += [("user", t["prompt"], None), ("assistant", t["reply"], t["trace"])]
@@ -199,18 +227,18 @@ def main() -> None:
     with st.sidebar:
         st.title("🕸️ Reachable")
         st.caption("Which of your CVEs can actually be reached? Proven with graph paths in FalkorDB.")
-        st.markdown(f"**Run:** `{findings[0]['label']}`  \n**Gemini:** {'on' if st.session_state.agent.live else 'off (offline mode)'}")
+        st.markdown(f"**Target:** {tgt.label}  \n**Run:** `{findings[0]['label']}`  \n**Gemini:** {'on' if st.session_state.agent.live else 'off (offline mode)'}")
         st.divider()
         if PUBLIC:
             st.info("Read-only public demo: rebuilds, what-if edits and real actions are disabled by the backend.")
-            fw = frozen.load_whatif()
+            fw = frozen.load_whatif() if tgt.name == targets.DEFAULT else None
             if fw:
                 st.subheader("What-if (recorded)")
                 st.caption(f"{fw['description']}: exposed advisories {fw['exposed_before']} → {fw['exposed_after']} "
                            f"(snapshots `{fw['baseline_snapshot']}` → `{fw['variant_snapshot']}`)")
                 with st.expander(f"{len(fw['flips'])} verdict flips"):
                     st.dataframe(pd.DataFrame(fw["flips"]), hide_index=True)
-        else:
+        elif len(tgt.variants) > 1:
             st.subheader("What-if: change the code")
             variant = st.radio("App version", list(ingest.VARIANTS), format_func=lambda k: ingest.VARIANTS[k]["label"])
             if st.button("Re-ingest app code & re-triage", width="stretch"):
@@ -224,6 +252,9 @@ def main() -> None:
             if st.button("Rebuild everything from scratch", width="stretch"):
                 s.reset()
                 st.rerun()
+        elif st.button("Rebuild everything from scratch", width="stretch"):
+            s.reset()
+            st.rerun()
 
     st.header("Vulnerability reachability triage")
     counts = {v: sum(1 for f in findings if f["verdict"] == v) for v in VERDICT_STYLE}
@@ -278,7 +309,7 @@ def main() -> None:
             st.iframe(path_graph(s, exposed, "720px"), height=740)
 
     with tab_fix:
-        render_fix_tab(s, PUBLIC)
+        render_fix_tab(s, PUBLIC, tgt.name == targets.DEFAULT)
 
     with tab_agent:
         st.caption("Gemini decides which graph tools to call (explain_finding, recommend_fixes, verify_remediation, query_graph, ...). "
@@ -299,7 +330,8 @@ def main() -> None:
                             args = ", ".join(f"{k}={v!r}" for k, v in t["args"].items())
                             st.markdown(f"`{t['tool']}({args})` → {t.get('summary', '')}")
                 st.markdown(text)
-        examples = ["Summarize the risk: what is actually reachable?", "Why is GHSA-q2q7-5pp4-w6pg reachable? Show the path.",
+        top_reach = next((f["vuln"] for f in findings if f["verdict"] == "REACHABLE"), findings[0]["vuln"])
+        examples = ["Summarize the risk: what is actually reachable?", f"Why is {top_reach} reachable? Show the path.",
                     "What should we fix first? Plan it, check it, and propose the PR.", "Propose issues for everything reachable."]
         picked = None
         for col, ex in zip(st.columns(len(examples)), examples):

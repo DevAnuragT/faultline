@@ -1,0 +1,95 @@
+From 37797aba260022c871718e0908b472727d366d09 Mon Sep 17 00:00:00 2001
+From: David Lord <davidism@gmail.com>
+Date: Sun, 4 Jan 2026 14:03:55 -0800
+Subject: [PATCH] `safe_join` prevents windows special device names with
+ compound extensions
+
+---
+ CHANGES.rst              |  2 ++
+ src/werkzeug/security.py | 19 +++++++++++++------
+ tests/test_security.py   | 10 ++++++++--
+ 3 files changed, 23 insertions(+), 8 deletions(-)
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index e95b562c2..be69999d5 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -5,6 +5,8 @@ Version 3.1.5
+ 
+ Unreleased
+ 
++-   ``safe_join`` on Windows does not allow more special device names, regardless
++    of extension or surrounding spaces. :ghsa:`87hc-h4r5-73f7`
+ -   The multipart form parser handles a ``\r\n`` sequence at a chunk boundary.
+     This fixes the previous attempt, which caused incorrect content lengths.
+     :issue:`3065` :issue:`3077`
+diff --git a/src/werkzeug/security.py b/src/werkzeug/security.py
+index 9c0b7d536..85849796f 100644
+--- a/src/werkzeug/security.py
++++ b/src/werkzeug/security.py
+@@ -12,13 +12,16 @@
+ _os_alt_seps: list[str] = list(
+     sep for sep in [os.sep, os.path.altsep] if sep is not None and sep != "/"
+ )
++# https://chrisdenton.github.io/omnipath/Special%20Dos%20Device%20Names.html
+ _windows_device_files = {
+-    "CON",
+-    "PRN",
+     "AUX",
++    "CON",
++    "CONIN$",
++    "CONOUT$",
++    *(f"COM{c}" for c in "123456789¹²³"),
++    *(f"LPT{c}" for c in "123456789¹²³"),
+     "NUL",
+-    *(f"COM{i}" for i in range(10)),
+-    *(f"LPT{i}" for i in range(10)),
++    "PRN",
+ }
+ 
+ 
+@@ -148,8 +151,12 @@ def safe_join(directory: str, *pathnames: str) -> str | None:
+         base directory.
+     :return: A safe path, otherwise ``None``.
+ 
++    .. versionchanged:: 3.1.5
++        More special device names, regardless of extension or trailing spaces,
++        are not allowed on Windows.
++
+     .. versionchanged:: 3.1.4
+-        Special device names are disallowed on Windows.
++        Special device names are not allowed on Windows.
+     """
+     if not directory:
+         # Ensure we end up with ./path if directory="" is given,
+@@ -166,7 +173,7 @@ def safe_join(directory: str, *pathnames: str) -> str | None:
+             any(sep in filename for sep in _os_alt_seps)
+             or (
+                 os.name == "nt"
+-                and os.path.splitext(filename)[0].upper() in _windows_device_files
++                and filename.partition(".")[0].strip().upper() in _windows_device_files
+             )
+             or os.path.isabs(filename)
+             # ntpath.isabs doesn't catch this on Python < 3.11
+diff --git a/tests/test_security.py b/tests/test_security.py
+index 999bd706c..a40628bce 100644
+--- a/tests/test_security.py
++++ b/tests/test_security.py
+@@ -72,9 +72,15 @@ def test_safe_join_empty_trusted():
+     assert safe_join("", "c:test.txt") == "./c:test.txt"
+ 
+ 
+-def test_safe_join_windows_special(monkeypatch: pytest.MonkeyPatch) -> None:
++@pytest.mark.parametrize(
++    "name", ["CON", "CON.txt", "CON.txt.html", "CON  ", "CON . txt"]
++)
++def test_safe_join_windows_special(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+     """Windows special device name is not allowed on Windows."""
+     monkeypatch.setattr("os.name", "nt")
+-    assert safe_join("a", "CON") is None
++    assert safe_join("a", name) is None
++
++
++def test_safe_join_not_windows_special(monkeypatch: pytest.MonkeyPatch) -> None:
+     monkeypatch.setattr("os.name", "posix")
+     assert safe_join("a", "CON") == "a/CON"

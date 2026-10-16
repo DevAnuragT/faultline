@@ -65,6 +65,7 @@ class Mod:
     stars: list[str] = field(default_factory=list)
     funcs: dict[str, str] = field(default_factory=dict)
     classes: dict[str, str] = field(default_factory=dict)
+    var_exprs: dict[str, tuple] = field(default_factory=dict)  # module-level `X = expr` / `X: T = expr`
     dist: str = ""
     lines: list[str] = field(default_factory=list, repr=False)
 
@@ -96,6 +97,7 @@ class CallGraph:
         self.registered: dict[str, set[str]] = defaultdict(set)  # dist -> functions registered at import time
         self.dispatch_sites: list[str] = []
         self._locals: dict[str, set[str]] = {}
+        self._resolving: set[tuple[str, str]] = set()
         self._visible: dict[str, set[str]] = {}
 
     # ------------------------------------------------------------------ indexing
@@ -178,6 +180,11 @@ class CallGraph:
                 if parent is None and cls is None:
                     mod.classes[stmt.name] = qual
                 self._collect_defs(stmt.body, mod, qual, c, None)
+            elif isinstance(stmt, (ast.Assign, ast.AnnAssign)) and cls is None and parent is None:
+                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                    mod.var_exprs.setdefault(stmt.targets[0].id, (stmt.value, None))
+                elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                    mod.var_exprs.setdefault(stmt.target.id, (stmt.value, stmt.annotation))
             elif isinstance(stmt, (ast.If, ast.Try, ast.With, ast.For, ast.While)):
                 for attr in ("body", "orelse", "finalbody"):
                     self._collect_defs(getattr(stmt, attr, []), mod, prefix, cls, parent)
@@ -185,6 +192,27 @@ class CallGraph:
                     self._collect_defs(h.body, mod, prefix, cls, parent)
 
     # ------------------------------------------------------------------ resolution
+    def _resolve_module_var(self, m: Mod, name: str, depth: int):
+        """Type a module-level binding: an annotated global (`request: Request = LocalProxy(...)`) is an instance of the
+        annotated class; `decode = _jwt.decode` aliases the resolved function; `obj = Cls()` is an instance."""
+        key = (m.name, name)
+        if key in self._resolving or depth > 6:
+            return None
+        self._resolving.add(key)
+        try:
+            value, ann = m.var_exprs[name]
+            ctx = Ctx(m.name, None, self.funcs[f"{m.name}.<module>"])
+            if ann is not None:
+                t = self._annotation(ann, ctx)
+                if t:
+                    return t
+            if value is None:
+                return None
+            r = self.resolve_expr(value, ctx)
+            return r if r and r[0] in ("fn", "inst", "cls", "mod") else None
+        finally:
+            self._resolving.discard(key)
+
     def resolve_name_in_module(self, mname: str, name: str, depth: int = 0):
         m = self.mods.get(mname)
         if not m or depth > 8:
@@ -201,6 +229,10 @@ class CallGraph:
             if f"{base}.{sym}" in self.mods:
                 return ("mod", f"{base}.{sym}")
             return self.resolve_name_in_module(base, sym, depth + 1)
+        if name in m.var_exprs:
+            r = self._resolve_module_var(m, name, depth)
+            if r:
+                return r
         for star in m.stars:
             r = self.resolve_name_in_module(star, name, depth + 1)
             if r:

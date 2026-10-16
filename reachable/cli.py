@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import sys
 
-from . import actions, analysis, frozen, ingest, planner, verify
+from . import actions, analysis, config, frozen, ingest, planner, targets, verify
 from .agent import Agent
 from .graph import Store
 
@@ -18,10 +18,15 @@ def _print_findings(st: Store) -> None:
 
 
 def main(argv: list[str]) -> int:
+    if "--target" in argv:  # e.g. python -m reachable.cli ingest --target microblog
+        i = argv.index("--target")
+        config.TARGET = argv[i + 1]
+        del argv[i:i + 2]
+    tgt = targets.get(config.TARGET)
     cmd = argv[0] if argv else "help"
-    st = Store()
+    st = Store(tgt.graph)
     if cmd == "ingest":
-        print(ingest.full_ingest(st))
+        print(ingest.full_ingest(st, target=tgt))
         print("run:", analysis.triage(st))
         _print_findings(st)
     elif cmd == "triage":
@@ -51,17 +56,18 @@ def main(argv: list[str]) -> int:
         r = frozen.record_agent(st)
         print(f"agent conversation recorded: {len(r['turns'])} turns with {r['model']}; snapshot {r['snapshot']}")
     elif cmd == "seed":
-        print(ingest.full_ingest(st))
+        print(ingest.full_ingest(st, target=tgt))
         analysis.triage(st)
         res = verify.run_closed_loop(st)
         print("remediation:", res["status"], res["before"], "->", res["after"])
-        r = frozen.record_whatif(st)
-        print(f"what-if recorded: {len(r['flips'])} flips; snapshot {r['baseline_snapshot']}")
-        try:
-            a = frozen.record_agent(st)
-            print(f"agent conversation recorded: {len(a['turns'])} turns with {a['model']}")
-        except Exception as exc:  # no key / quota: the recorded conversation from the repo stays in place
-            print(f"agent conversation not re-recorded ({exc.__class__.__name__}); keeping the existing recording")
+        if tgt.name == targets.DEFAULT:  # recorded demo artifacts exist only for the demo app
+            r = frozen.record_whatif(st)
+            print(f"what-if recorded: {len(r['flips'])} flips; snapshot {r['baseline_snapshot']}")
+            try:
+                a = frozen.record_agent(st)
+                print(f"agent conversation recorded: {len(a['turns'])} turns with {a['model']}")
+            except Exception as exc:  # no key / quota: the recorded conversation from the repo stays in place
+                print(f"agent conversation not re-recorded ({exc.__class__.__name__}); keeping the existing recording")
     elif cmd == "approve":
         print(actions.execute(st, argv[1]))
     else:

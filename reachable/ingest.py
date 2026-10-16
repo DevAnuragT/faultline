@@ -10,26 +10,17 @@ from pathlib import Path
 
 from packaging.requirements import Requirement
 
-from . import callgraph, guard, sources
+from . import callgraph, guard, sources, targets
 from .advisories import Vuln, query_pinned
 from .config import CACHE, DEMO_APP
+from .targets import Target
 from .graph import Store, batches
 from .symbols import extract_symbols
 
-APP = "vulnshop"
 PYPI_CACHE = CACHE / "pypi"
 PYPI_CACHE.mkdir(parents=True, exist_ok=True)
-PARSED_PACKAGES = ["PyYAML", "requests", "urllib3", "Jinja2"]  # sources we statically analyze
 
-# What-if variants of the demo app: (file, old, new) text replacements applied to a temp copy.
-VARIANTS: dict[str, dict] = {
-    "baseline": {"label": "Baseline vulnshop", "edits": []},
-    "no_preview_fetch": {
-        "label": "Remove the outbound HTTP call from /preview",
-        "edits": [("preview.py", "    resp = requests.get(url, timeout=5)\n    return resp.text[:500]",
-                   "    return f\"preview unavailable for {url}\"")],
-    },
-}
+VARIANTS = targets.DEMO_VARIANTS  # what-if variants of the demo app (other targets only have a baseline)
 
 
 def _norm(n: str) -> str:
@@ -78,15 +69,16 @@ def dependency_edges(pins: dict[str, str]) -> list[tuple[str, str, str]]:
     return edges
 
 
-def prepare_app_dir(variant: str) -> Path:
-    """Return a directory containing the demo app with the variant's edits applied."""
-    if variant == "baseline":
-        return DEMO_APP
-    tmp = Path(tempfile.mkdtemp(prefix="vulnshop_"))
-    shutil.copytree(DEMO_APP, tmp / "demo_app")
-    root = tmp / "demo_app"
-    for rel, old, new in VARIANTS[variant]["edits"]:
-        f = root / APP / rel
+def prepare_app_dir(variant: str, target: Target | None = None) -> Path:
+    """Directory containing the app's package dirs, with the variant's edits applied to a temp copy."""
+    target = target or targets.get(None)
+    if variant == "baseline" or not target.variants.get(variant, {}).get("edits"):
+        return target.root
+    tmp = Path(tempfile.mkdtemp(prefix=f"{target.name}_"))
+    shutil.copytree(target.root, tmp / "app_copy")
+    root = tmp / "app_copy"
+    for rel, old, new in target.variants[variant]["edits"]:
+        f = root / target.packages[0] / rel
         text = f.read_text()
         if old not in text:
             raise ValueError(f"variant edit for {rel} did not match")
@@ -94,46 +86,64 @@ def prepare_app_dir(variant: str) -> Path:
     return root
 
 
-def build_callgraph(pins: dict[str, str], app_dir: Path) -> callgraph.CallGraph:
-    roots = [(app_dir / APP, APP)]
-    for name in PARSED_PACKAGES:
-        for r in sources.package_roots(sources.fetch_package(name, pins[name])):
-            roots.append((r, f"{name}=={pins[name]}"))
-    return callgraph.build(roots)
+def parsed_packages(target: Target, pins: dict[str, str], vulns: list[Vuln]) -> list[str]:
+    """Which dependency sources we statically analyze: the target's fixed list, or every pin that has advisories."""
+    if target.parsed is not None:
+        return [p for p in target.parsed if p in pins]
+    return sorted({v.package for v in vulns if v.package in pins})
+
+
+def build_callgraph(pins: dict[str, str], app_dir: Path, target: Target | None = None, parsed: list[str] | None = None,
+                    progress=lambda *_: None) -> tuple[callgraph.CallGraph, list[str]]:
+    """Returns (call graph, packages actually parsed). Packages whose source can't be fetched are skipped, not fatal."""
+    target = target or targets.get(None)
+    roots = [(app_dir / pkg, target.name) for pkg in target.packages]
+    done: list[str] = []
+    for name in (parsed if parsed is not None else list(target.parsed or [])):
+        try:
+            found = sources.package_roots(sources.fetch_package(name, pins[name]))
+        except Exception as exc:
+            progress(f"  skipping {name}=={pins[name]}: {exc.__class__.__name__}")
+            continue
+        if not found:
+            continue
+        done.append(name)
+        roots += [(r, f"{name}=={pins[name]}") for r in found]
+    return callgraph.build(roots), done
 
 
 def _pkg_key(name: str, pins: dict[str, str]) -> str:
     return f"{name}=={pins[name]}"
 
 
-def load_supply_chain(st: Store, pins: dict[str, str], direct: list[str]) -> None:
-    st.q("MERGE (:Repo {name:$n})", {"n": APP})
-    rows = [{"key": _pkg_key(n, pins), "name": n, "version": v, "parsed": n in PARSED_PACKAGES,
+def load_supply_chain(st: Store, pins: dict[str, str], direct: list[str], target: Target, parsed: list[str]) -> None:
+    st.q("MERGE (:Repo {name:$n})", {"n": target.name})
+    rows = [{"key": _pkg_key(n, pins), "name": n, "version": v, "parsed": n in parsed,
              "direct": _norm(n) in {_norm(d) for d in direct}} for n, v in pins.items()]
     st.q("UNWIND $rows AS r CREATE (:PackageVersion {key:r.key, name:r.name, version:r.version, parsed:r.parsed, direct:r.direct})",
          {"rows": rows})
     st.q("UNWIND $rows AS r MATCH (a:Repo {name:$app}), (p:PackageVersion {key:r.key}) WHERE r.direct "
-         "CREATE (a)-[:DEPENDS_ON {direct:true}]->(p)", {"rows": rows, "app": APP})
+         "CREATE (a)-[:DEPENDS_ON {direct:true}]->(p)", {"rows": rows, "app": target.name})
     deps = [{"a": _pkg_key(a, pins), "b": _pkg_key(b, pins), "spec": spec} for a, b, spec in dependency_edges(pins)]
     if deps:
         st.q("UNWIND $rows AS r MATCH (a:PackageVersion {key:r.a}), (b:PackageVersion {key:r.b}) "
              "CREATE (a)-[:DEPENDS_ON {direct:false, spec:r.spec}]->(b)", {"rows": deps})
 
 
-def _module_rows(cg: callgraph.CallGraph, only_app: bool | None = None):
+def _module_rows(cg: callgraph.CallGraph, app: str, only_app: bool | None = None):
     rows = []
     for m in cg.mods.values():
-        is_app = m.dist == APP
+        is_app = m.dist == app
         if only_app is not None and is_app != only_app:
             continue
         rows.append({"name": m.name, "file": m.file, "dist": m.dist, "layer": "app" if is_app else "dep"})
     return rows
 
 
-def _func_rows(cg: callgraph.CallGraph, only_app: bool | None = None):
+def _func_rows(cg: callgraph.CallGraph, app: str, only_app: bool | None = None):
     rows = []
     for f in cg.funcs.values():
-        is_app = cg.mods[f.module].dist == APP
+        is_app = cg.mods[f.module].dist == app
         if only_app is not None and is_app != only_app:
             continue
         rows.append({"q": f.qual, "name": f.name, "module": f.module, "file": f.file, "line": f.line,
@@ -142,10 +152,12 @@ def _func_rows(cg: callgraph.CallGraph, only_app: bool | None = None):
     return rows
 
 
-def load_code(st: Store, cg: callgraph.CallGraph, pins: dict[str, str], only_app: bool | None = None) -> None:
-    for chunk in batches(_module_rows(cg, only_app)):
+def load_code(st: Store, cg: callgraph.CallGraph, pins: dict[str, str], target: Target,
+              only_app: bool | None = None) -> None:
+    app = target.name
+    for chunk in batches(_module_rows(cg, app, only_app)):
         st.q("UNWIND $rows AS r CREATE (:Module {name:r.name, file:r.file, dist:r.dist, layer:r.layer})", {"rows": chunk})
-    for chunk in batches(_func_rows(cg, only_app)):
+    for chunk in batches(_func_rows(cg, app, only_app)):
         st.q("UNWIND $rows AS r CREATE (:Function {qualname:r.q, name:r.name, module:r.module, file:r.file, "
              "line:r.line, end_line:r.end, dist:r.dist, layer:r.layer, is_module_body:r.body})", {"rows": chunk})
     # Wire modules to functions, and modules to their package / repo.
@@ -153,12 +165,12 @@ def load_code(st: Store, cg: callgraph.CallGraph, pins: dict[str, str], only_app
     st.q("MATCH (f:Function) WHERE f.layer IN $layers MATCH (m:Module {name:f.module}) "
          "WHERE NOT (m)-[:DEFINES]->(f) CREATE (m)-[:DEFINES]->(f)", {"layers": layers})
     if only_app is not False:
-        st.q("MATCH (r:Repo {name:$app}), (m:Module {layer:'app'}) CREATE (r)-[:CONTAINS]->(m)", {"app": APP})
+        st.q("MATCH (r:Repo {name:$app}), (m:Module {layer:'app'}) CREATE (r)-[:CONTAINS]->(m)", {"app": app})
     if only_app is not True:
         st.q("MATCH (m:Module {layer:'dep'}), (p:PackageVersion {key:m.dist}) CREATE (p)-[:PROVIDES]->(m)")
     kinds = {callgraph.CALLS: [], callgraph.MAYBE_CALLS: [], callgraph.REFERENCES: []}
     for (s, d), k in cg.edges.items():
-        src_app = cg.mods[cg.funcs[s].module].dist == APP
+        src_app = cg.mods[cg.funcs[s].module].dist == app
         if only_app is not None and src_app != only_app:
             continue
         kinds[k].append({"s": s, "d": d})
@@ -166,20 +178,22 @@ def load_code(st: Store, cg: callgraph.CallGraph, pins: dict[str, str], only_app
         for chunk in batches(rows):
             st.q(f"UNWIND $rows AS r MATCH (a:Function {{qualname:r.s}}), (b:Function {{qualname:r.d}}) "
                  f"CREATE (a)-[:{kind}]->(b)", {"rows": chunk})
-    load_endpoints(st, cg)
+    load_endpoints(st, cg, app)
 
 
-def load_endpoints(st: Store, cg: callgraph.CallGraph) -> None:
+def load_endpoints(st: Store, cg: callgraph.CallGraph, app: str) -> None:
     rows = [{"id": f"{e.method} {e.route}", "route": e.route, "method": e.method, "func": e.func,
-             "public": e.public} for e in cg.endpoints if cg.mods[cg.funcs[e.func].module].dist == APP]
+             "public": e.public} for e in cg.endpoints if cg.mods[cg.funcs[e.func].module].dist == app]
     st.q("UNWIND $rows AS r MATCH (f:Function {qualname:r.func}) "
          "CREATE (e:Endpoint {id:r.id, route:r.route, method:r.method, public:r.public})-[:HANDLED_BY]->(f)", {"rows": rows})
-    st.q("MATCH (r:Repo {name:$app}), (e:Endpoint) CREATE (r)-[:EXPOSES]->(e)", {"app": APP})
+    st.q("MATCH (r:Repo {name:$app}), (e:Endpoint) CREATE (r)-[:EXPOSES]->(e)", {"app": app})
 
 
-def load_owners(st: Store, app_dir: Path) -> None:
+def load_owners(st: Store, target: Target) -> None:
+    if target.codeowners is None or not target.codeowners.exists():
+        return
     rows = []
-    for line in (app_dir / "CODEOWNERS").read_text().splitlines():
+    for line in target.codeowners.read_text().splitlines():
         if line.strip() and not line.startswith("#"):
             path, team = line.split()[:2]
             rows.append({"file": path, "team": team})
@@ -188,11 +202,11 @@ def load_owners(st: Store, app_dir: Path) -> None:
 
 
 def load_advisories(st: Store, vulns: list[Vuln], pins: dict[str, str], cg: callgraph.CallGraph,
-                    progress=print) -> None:
+                    parsed: list[str], progress=print) -> None:
     for i, v in enumerate(vulns, 1):
         sym = {"symbols": [], "confidence": 0, "source": "unparsed", "rationale": "Package source is not analyzed",
                "patch_url": None}
-        if v.package in PARSED_PACKAGES:
+        if v.package in parsed:
             progress(f"[{i}/{len(vulns)}] mapping {v.id} ({v.package}) to vulnerable symbol")
             sym = extract_symbols(v, cg)
         st.q("MATCH (p:PackageVersion {key:$key}) CREATE (v:Vuln {id:$id, cve:$cve, summary:$summary, severity:$sev, "
@@ -207,34 +221,42 @@ def load_advisories(st: Store, vulns: list[Vuln], pins: dict[str, str], cg: call
                  {"id": v.id, "q": s, "src": sym["source"], "conf": float(sym["confidence"])})
 
 
-def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict[str, str] | None = None) -> dict:
-    """Build every graph layer. `pins` overrides requirements.txt (used to build a candidate-fix scratch graph)."""
+def full_ingest(st: Store, variant: str = "baseline", progress=print, pins: dict[str, str] | None = None,
+                target: Target | None = None, parse: list[str] | None = None) -> dict:
+    """Build every graph layer. `pins` overrides the requirements file (used to build a candidate-fix scratch graph);
+    `parse` forces the set of dependency packages whose source is analysed (a candidate graph must analyse the same
+    packages as the baseline, even ones that no longer have advisories)."""
     guard.require_writable("Rebuilding the graph", st)
-    app_dir = prepare_app_dir(variant)
-    pins = pins or parse_requirements(DEMO_APP / "requirements.txt")
-    direct = [l.strip() for l in (DEMO_APP / "requirements.in").read_text().split() if l.strip()]
+    target = target or targets.get(None)
+    app_dir = prepare_app_dir(variant, target)
+    pins = pins or parse_requirements(target.requirements)
+    direct = ([l.strip() for l in target.direct_file.read_text().split() if l.strip()]
+              if target.direct_file and target.direct_file.exists() else list(pins))
+    progress("querying OSV advisories")
+    vulns = query_pinned(pins)
     progress("building call graph from app + dependency sources")
-    cg = build_callgraph(pins, app_dir)
+    cg, parsed = build_callgraph(pins, app_dir, target,
+                                 [p for p in parse if p in pins] if parse else parsed_packages(target, pins, vulns), progress)
     st.reset()
     st.ensure_indexes()
     progress("loading supply-chain layer")
-    load_supply_chain(st, pins, direct)
+    load_supply_chain(st, pins, direct, target, parsed)
     progress("loading code layer")
-    load_code(st, cg, pins)
-    load_owners(st, app_dir)
-    progress("querying OSV advisories")
-    vulns = query_pinned(pins)
-    load_advisories(st, vulns, pins, cg, progress)
-    return {"functions": len(cg.funcs), "edges": len(cg.edges), "vulns": len(vulns)}
+    load_code(st, cg, pins, target)
+    load_owners(st, target)
+    load_advisories(st, vulns, pins, cg, parsed, progress)
+    return {"functions": len(cg.funcs), "edges": len(cg.edges), "vulns": len(vulns), "parsed": parsed}
 
 
 def reload_app_layer(st: Store, variant: str) -> dict:
     """What-if: re-ingest only the app's code layer from a variant, leaving dependencies and advisories alone."""
-    guard.require_writable("The what-if re-ingest")
-    pins = parse_requirements(DEMO_APP / "requirements.txt")
-    cg = build_callgraph(pins, prepare_app_dir(variant))
+    guard.require_writable("The what-if re-ingest", st)
+    target = targets.of_store(st)
+    pins = parse_requirements(target.requirements)
+    parsed = [r[0] for r in st.q("MATCH (p:PackageVersion {parsed:true}) RETURN p.name")]
+    cg, _ = build_callgraph(pins, prepare_app_dir(variant, target), target, parsed)
     st.q("MATCH (n) WHERE (n:Function OR n:Module) AND n.layer = 'app' DETACH DELETE n")
     st.q("MATCH (e:Endpoint) DETACH DELETE e")
-    load_code(st, cg, pins, only_app=True)
-    load_owners(st, prepare_app_dir(variant))
+    load_code(st, cg, pins, target, only_app=True)
+    load_owners(st, target)
     return {"functions": len(cg.funcs), "edges": len(cg.edges)}

@@ -17,13 +17,12 @@ import subprocess
 import time
 import uuid
 
-from . import analysis, config, guard, verify
+from . import analysis, config, guard, targets, verify
 from .graph import Store
 
 OUT = config.ROOT / "out"
 EXPOSED = {"REACHABLE", "POSSIBLY_REACHABLE"}
 BASE_BRANCH = "master"
-REQ_PATH = "demo_app/requirements.txt"
 
 
 def _sha(text: str) -> str:
@@ -111,8 +110,9 @@ def _vex_payload(st: Store) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------- pr
-def _pr_payload(rem: dict) -> dict:
-    return {"type": "pr", "repo": _repo(), "base": BASE_BRANCH, "branch": f"reachable/fix-{rem['id']}", "path": REQ_PATH,
+def _pr_payload(rem: dict, st: Store) -> dict:
+    return {"type": "pr", "repo": _repo(), "base": BASE_BRANCH, "branch": f"reachable/fix-{rem['id']}",
+            "path": targets.of_store(st).repo_path,
             "remediation": rem["id"], "status": rem["status"], "diff_sha": _sha(rem["requirements_diff"]),
             "pins_after": rem["plan"]["pins_after"], "baseline_snapshot": rem["baseline_snapshot"],
             "candidate_snapshot": rem["candidate_snapshot"]}
@@ -174,7 +174,7 @@ def propose_fix_pr(st: Store, remediation_id: str | None = None) -> dict:
     if rem["baseline_snapshot"] != _latest_snapshot(st):
         return {"ok": False, "error": "remediation was checked against an older graph snapshot; re-run verification"}
     changes = ", ".join(f"{c['package']} {c['from']}->{c['to']}" for c in rem["plan"]["changes"])
-    res = _store_action(st, "pr", rem["id"], f"Draft PR: {changes}", _pr_payload(rem), link=("Remediation", rem["id"]))
+    res = _store_action(st, "pr", rem["id"], f"Draft PR: {changes}", _pr_payload(rem, st), link=("Remediation", rem["id"]))
     res["title"] = f"Draft PR: {changes}"
     return res
 
@@ -189,7 +189,7 @@ def _fresh_payload(st: Store, typ: str, subject: str) -> dict | None:
         rem = _remediation(st, subject)
         if not rem or rem["status"] != "VERIFIED" or rem["baseline_snapshot"] != _latest_snapshot(st):
             return None
-        return _pr_payload(rem)
+        return _pr_payload(rem, st)
     return None
 
 

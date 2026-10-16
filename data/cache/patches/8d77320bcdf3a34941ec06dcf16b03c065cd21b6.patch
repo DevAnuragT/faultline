@@ -1,0 +1,48 @@
+From b2a2c09730086ab2d375f0b069c821d4edf526b7 Mon Sep 17 00:00:00 2001
+From: David Lord <davidism@gmail.com>
+Date: Sun, 27 Sep 2026 10:33:26 -0700
+Subject: [PATCH] disallow special name with ads
+
+---
+ CHANGES.rst              | 2 ++
+ src/werkzeug/security.py | 7 ++++++-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/CHANGES.rst b/CHANGES.rst
+index c4e26ba59..329aead83 100644
+--- a/CHANGES.rst
++++ b/CHANGES.rst
+@@ -5,6 +5,8 @@ Version 3.1.9
+ 
+ Unreleased
+ 
++-   ``safe_join`` on Windows does not allow special devices names with empty ADS
++    markers on NTFS. :ghsa:`g6x2-hccm-hh4m`
+ -   ``ProfilerMiddleware`` uses ``profiling.tracing`` on Python 3.15.
+     :issue:`3207`
+ -   ``uri_to_iri`` and ``iri_to_uri`` preserve empty username, password, and
+diff --git a/src/werkzeug/security.py b/src/werkzeug/security.py
+index 37d500888..1a45b41ef 100644
+--- a/src/werkzeug/security.py
++++ b/src/werkzeug/security.py
+@@ -173,6 +173,10 @@ def safe_join(directory: str, *untrusted: str) -> str | None:
+         base directory.
+     :return: A safe path, otherwise ``None``.
+ 
++    .. versionchanged:: 3.1.9
++        Special device names with empty ADS stream markers are not allowed on
++        Windows.
++
+     .. versionchanged:: 3.1.6
+         Special device names in multi-segment paths are not allowed on Windows.
+ 
+@@ -206,7 +210,8 @@ def safe_join(directory: str, *untrusted: str) -> str | None:
+             or (
+                 os.name == "nt"
+                 and any(
+-                    p.partition(".")[0].strip().upper() in _windows_device_files
++                    p.partition(":")[0].partition(".")[0].strip().upper()
++                    in _windows_device_files
+                     for p in part.split("/")
+                 )
+             )

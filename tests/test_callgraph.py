@@ -105,3 +105,26 @@ def test_pyyaml_exposure_only_uses_registry_dispatch_as_weak_edge(vulnshop_cg):
     # Exactly two honest weak links: yaml.load instantiates a parameterized Loader class, and
     # construct_object dispatches through a runtime constructor registry.
     assert weak == [("load", "get_single_data"), ("construct_object", "construct_python_object_new")]
+
+
+def test_module_level_alias_to_instance_method_resolves(tmp_path):
+    lib = make_pkg(tmp_path, "jwtlike", {
+        "api.py": ("class Jwt:\n    def decode(self, t):\n        return self._payload(t)\n\n    def _payload(self, t):\n        return t\n\n"
+                   "_global = Jwt()\ndecode = _global.decode\n"),
+    })
+    (lib / "__init__.py").write_text("from .api import decode\n")
+    app = make_pkg(tmp_path, "svc2", {"v.py": "import jwtlike\n\ndef verify(token):\n    return jwtlike.decode(token)\n"})
+    cg = callgraph.build([(app, "svc2"), (lib, "jwtlike==1")])
+    assert edge_kinds(cg, "svc2.v.verify", "Jwt.decode") == {CALLS}
+    assert edge_kinds(cg, "jwtlike.api.Jwt.decode", "Jwt._payload") == {CALLS}
+
+
+def test_annotated_module_global_is_typed_by_its_annotation(tmp_path):
+    lib = make_pkg(tmp_path, "weblib", {
+        "wrappers.py": "class Request:\n    def get_json(self):\n        return {}\n",
+        "globals.py": "from .wrappers import Request\n\nrequest: Request = object()  # a proxy at runtime\n",
+    })
+    (lib / "__init__.py").write_text("from .globals import request\n")
+    app = make_pkg(tmp_path, "svc3", {"v.py": "from weblib import request\n\ndef handler():\n    return request.get_json()\n"})
+    cg = callgraph.build([(app, "svc3"), (lib, "weblib==1")])
+    assert edge_kinds(cg, "svc3.v.handler", "Request.get_json") == {CALLS}

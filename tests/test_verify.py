@@ -64,3 +64,23 @@ def test_inconsistent_pins_are_rejected(st):
     res = verify.verify_plan(st, plan, progress=lambda *_: None)
     assert res["status"] == "REJECTED"
     assert not next(g for g in res["gates"] if g["name"] == "dependency constraints consistent")["passed"]
+
+
+def test_candidate_graph_analyses_the_same_packages_even_if_they_no_longer_have_advisories(st):
+    """Regression: in auto mode only packages WITH advisories were parsed, so an upgraded (clean) package vanished from the
+    candidate graph and 'exposure 11 -> 0' looked like a success. Verification must pass the baseline's package set."""
+    from reachable import ingest, targets
+    t = targets.TARGETS["vulnshop"]
+    auto = type(t)(**{**t.__dict__, "parsed": None})  # auto mode
+    pins = ingest.parse_requirements(t.requirements)
+    vulns = ingest.query_pinned(pins)
+    base = ingest.parsed_packages(auto, pins, vulns)
+    clean = {**pins, "requests": "2.33.0", "urllib3": "2.6.3", "PyYAML": "5.4"}
+    after = ingest.parsed_packages(auto, clean, ingest.query_pinned(clean))
+    assert {"requests", "urllib3", "PyYAML"} <= set(base) and not {"requests", "urllib3", "PyYAML"} <= set(after)
+    scratch = Store("reachable_parse_test")
+    try:
+        ingest.full_ingest(scratch, progress=lambda *_: None, pins=clean, target=auto, parse=base)
+        assert {r[0] for r in scratch.q("MATCH (p:PackageVersion {parsed:true}) RETURN p.name")} >= {"requests", "urllib3", "PyYAML"}
+    finally:
+        scratch.reset()

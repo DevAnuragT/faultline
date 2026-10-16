@@ -1,0 +1,116 @@
+From 72e10c573ca0fbcbddd4455abca8ce92a61780d7 Mon Sep 17 00:00:00 2001
+From: Mike Bayer <mike_mp@zzzcomputing.com>
+Date: Tue, 28 Apr 2026 13:57:29 -0400
+Subject: [PATCH] Fix path traversal via backslash URI on Windows in
+ TemplateLookup
+
+The URI normalization in TemplateLookup.get_template() used posixpath
+which treats backslash as a literal character, but os.path.isfile()
+on Windows treats it as a path separator.  A URI such as
+"\..\secret.txt" could bypass the directory traversal check.
+Backslash characters in URIs are now normalized to forward slashes
+before path resolution in both get_template() and Template.__init__.
+
+Fixes: #435
+Change-Id: I68badd0f4f07ec086a1c609de335d7366daac6ef
+---
+ doc/build/unreleased/435.rst | 10 +++++++++
+ mako/lookup.py               |  2 +-
+ mako/template.py             |  2 +-
+ test/test_lookup.py          | 40 ++++++++++++++++++++++++++++++++++++
+ 4 files changed, 52 insertions(+), 2 deletions(-)
+ create mode 100644 doc/build/unreleased/435.rst
+
+diff --git a/doc/build/unreleased/435.rst b/doc/build/unreleased/435.rst
+new file mode 100644
+index 00000000..d38e4910
+--- /dev/null
++++ b/doc/build/unreleased/435.rst
+@@ -0,0 +1,10 @@
++.. change::
++    :tags: bug, template
++    :tickets: 435
++
++    Fixed issue in :class:`.TemplateLookup` where a URI with backslash path
++    separators (e.g. ``\..\secret.txt``) could bypass the directory traversal
++    check on Windows, allowing reads of arbitrary files outside of the template
++    directory.  This is an incomplete fix for :cve:`2026-41205`.  Backslash
++    characters in URIs are now normalized to forward slashes before path
++    resolution.
+diff --git a/mako/lookup.py b/mako/lookup.py
+index 1a431c80..fae03af0 100644
+--- a/mako/lookup.py
++++ b/mako/lookup.py
+@@ -241,7 +241,7 @@ def get_template(self, uri):
+             else:
+                 return self._collection[uri]
+         except KeyError as e:
+-            u = re.sub(r"^\/+", "", uri)
++            u = re.sub(r"^\/+", "", uri.replace("\\", "/"))
+             for dir_ in self.directories:
+                 # make sure the path seperators are posix - os.altsep is empty
+                 # on POSIX and cannot be used.
+diff --git a/mako/template.py b/mako/template.py
+index d8ebc949..d85a7f5e 100644
+--- a/mako/template.py
++++ b/mako/template.py
+@@ -259,7 +259,7 @@ def __init__(
+             self.module_id = "memory:" + hex(id(self))
+             self.uri = self.module_id
+ 
+-        u_norm = self.uri.lstrip("/")
++        u_norm = self.uri.replace("\\", "/").lstrip("/")
+         u_norm = os.path.normpath(u_norm)
+         if u_norm.startswith(".."):
+             raise exceptions.TemplateLookupException(
+diff --git a/test/test_lookup.py b/test/test_lookup.py
+index 2f7cdf0b..3d338eed 100644
+--- a/test/test_lookup.py
++++ b/test/test_lookup.py
+@@ -168,6 +168,46 @@ def test_dont_accept_relative_outside_of_root_via_double_slash(self):
+                 "///" + rel,
+             )
+ 
++    def test_dont_accept_relative_outside_of_root_via_backslash(self):
++        """test that backslash traversal URI can't bypass the
++        path traversal check"""
++        with tempfile.TemporaryDirectory() as base:
++            tmpl_dir = os.path.join(base, "app", "templates")
++            os.makedirs(tmpl_dir)
++            with open(os.path.join(tmpl_dir, "index.html"), "w") as f:
++                f.write("Hello")
++
++            secret = os.path.join(base, "secrets", "creds.txt")
++            os.makedirs(os.path.dirname(secret))
++            with open(secret, "w") as f:
++                f.write("SECRET_KEY=supersecret123")
++
++            tl = lookup.TemplateLookup(directories=[tmpl_dir])
++            rel = os.path.relpath(secret, tmpl_dir).replace("/", "\\")
++
++            assert_raises_message(
++                exceptions.TemplateLookupException,
++                "cannot be relative outside of the root path",
++                tl.get_template,
++                rel,
++            )
++
++            # with leading backslash
++            assert_raises_message(
++                exceptions.TemplateLookupException,
++                "cannot be relative outside of the root path",
++                tl.get_template,
++                "\\" + rel,
++            )
++
++            # with leading forward slash
++            assert_raises_message(
++                exceptions.TemplateLookupException,
++                "cannot be relative outside of the root path",
++                tl.get_template,
++                "/" + rel,
++            )
++
+     def test_checking_against_bad_filetype(self):
+         with tempfile.TemporaryDirectory() as tempdir:
+             tl = lookup.TemplateLookup(directories=[tempdir])

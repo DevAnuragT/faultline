@@ -1,0 +1,1 @@
+["typing_extensions>=4.0; python_version < \"3.11\"", "cryptography>=3.4.0; extra == \"crypto\""]

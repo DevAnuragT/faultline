@@ -1,0 +1,602 @@
+From fe8980b4505cea1982979fdca20c4078ed8fb8c6 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 09:38:31 -0400
+Subject: [PATCH 01/10] Remove pop_prefix parameter, unused.
+
+---
+ setuptools/package_index.py | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index f5a7d77eed..345344c2c2 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -863,7 +863,7 @@ def _download_svn(self, url, _filename):
+         raise DistutilsError(f"Invalid config, SVN download is not supported: {url}")
+ 
+     @staticmethod
+-    def _vcs_split_rev_from_url(url, pop_prefix=False):
++    def _vcs_split_rev_from_url(url):
+         scheme, netloc, path, query, frag = urllib.parse.urlsplit(url)
+ 
+         scheme = scheme.split('+', 1)[-1]
+@@ -882,7 +882,7 @@ def _vcs_split_rev_from_url(url, pop_prefix=False):
+ 
+     def _download_git(self, url, filename):
+         filename = filename.split('#', 1)[0]
+-        url, rev = self._vcs_split_rev_from_url(url, pop_prefix=True)
++        url, rev = self._vcs_split_rev_from_url(url)
+ 
+         self.info("Doing git clone from %s to %s", url, filename)
+         os.system("git clone --quiet %s %s" % (url, filename))
+@@ -901,7 +901,7 @@ def _download_git(self, url, filename):
+ 
+     def _download_hg(self, url, filename):
+         filename = filename.split('#', 1)[0]
+-        url, rev = self._vcs_split_rev_from_url(url, pop_prefix=True)
++        url, rev = self._vcs_split_rev_from_url(url)
+ 
+         self.info("Doing hg clone from %s to %s", url, filename)
+         os.system("hg clone --quiet %s %s" % (url, filename))
+
+From 35ee2b4abd8bc745766c809d31fc6bf19e6979dc Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 09:49:56 -0400
+Subject: [PATCH 02/10] Add a test capturing the basic expectation.
+
+---
+ setuptools/package_index.py | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index 345344c2c2..d2985cc1f9 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -864,6 +864,15 @@ def _download_svn(self, url, _filename):
+ 
+     @staticmethod
+     def _vcs_split_rev_from_url(url):
++        """
++        >>> vsrfu = PackageIndex._vcs_split_rev_from_url
++        >>> vsrfu('git+https://github.com/pypa/setuptools@v69.0.0#egg-info=setuptools')
++        ('https://github.com/pypa/setuptools', 'v69.0.0')
++        >>> vsrfu('git+https://github.com/pypa/setuptools#egg-info=setuptools')
++        ('https://github.com/pypa/setuptools', None)
++        >>> vsrfu('http://foo/bar')
++        ('http://foo/bar', None)
++        """
+         scheme, netloc, path, query, frag = urllib.parse.urlsplit(url)
+ 
+         scheme = scheme.split('+', 1)[-1]
+
+From eb42e5c45b5888863aa1877517f6dbf6f7b080cc Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 10:15:31 -0400
+Subject: [PATCH 03/10] Update _vcs_split_rev_from_url to use modern
+ constructs.
+
+---
+ setuptools/package_index.py | 23 ++++++++++++++---------
+ 1 file changed, 14 insertions(+), 9 deletions(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index d2985cc1f9..9da138d87c 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -865,6 +865,8 @@ def _download_svn(self, url, _filename):
+     @staticmethod
+     def _vcs_split_rev_from_url(url):
+         """
++        Given a possible VCS URL, return a clean URL and resolved revision if any.
++
+         >>> vsrfu = PackageIndex._vcs_split_rev_from_url
+         >>> vsrfu('git+https://github.com/pypa/setuptools@v69.0.0#egg-info=setuptools')
+         ('https://github.com/pypa/setuptools', 'v69.0.0')
+@@ -873,21 +875,24 @@ def _vcs_split_rev_from_url(url):
+         >>> vsrfu('http://foo/bar')
+         ('http://foo/bar', None)
+         """
+-        scheme, netloc, path, query, frag = urllib.parse.urlsplit(url)
++        parts = urllib.parse.urlsplit(url)
+ 
+-        scheme = scheme.split('+', 1)[-1]
++        clean_scheme = parts.scheme.split('+', 1)[-1]
+ 
+         # Some fragment identification fails
+-        path = path.split('#', 1)[0]
++        no_fragment_path, _, _ = parts.path.partition('#')
+ 
+-        rev = None
+-        if '@' in path:
+-            path, rev = path.rsplit('@', 1)
++        pre, sep, post = no_fragment_path.rpartition('@')
++        clean_path, rev = (pre, post) if sep else (post, None)
+ 
+-        # Also, discard fragment
+-        url = urllib.parse.urlunsplit((scheme, netloc, path, query, ''))
++        resolved = parts._replace(
++            scheme=clean_scheme,
++            path=clean_path,
++            # discard the fragment
++            fragment='',
++        ).geturl()
+ 
+-        return url, rev
++        return resolved, rev
+ 
+     def _download_git(self, url, filename):
+         filename = filename.split('#', 1)[0]
+
+From 7c1c29b56dcff03bb637eeabba139c31600a55d1 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 10:25:24 -0400
+Subject: [PATCH 04/10] package-index: Extract fall-through methods
+ _download_vcs and _download_other.
+
+---
+ setuptools/package_index.py | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index 9da138d87c..5a3e9db2a2 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -831,19 +831,24 @@ def _download_url(self, scheme, url, tmpdir):
+ 
+         filename = os.path.join(tmpdir, name)
+ 
+-        # Download the file
+-        #
++        return self._download_vcs(url, filename) or self._download_other(url, filename)
++
++    def _download_vcs(self, url, filename):
++        scheme = urllib.parse.urlsplit(url).scheme
+         if scheme == 'svn' or scheme.startswith('svn+'):
+             return self._download_svn(url, filename)
+         elif scheme == 'git' or scheme.startswith('git+'):
+             return self._download_git(url, filename)
+         elif scheme.startswith('hg+'):
+             return self._download_hg(url, filename)
+-        elif scheme == 'file':
+-            return urllib.request.url2pathname(urllib.parse.urlparse(url)[2])
+-        else:
+-            self.url_ok(url, True)  # raises error if not allowed
+-            return self._attempt_download(url, filename)
++
++    def _download_other(self, url, filename):
++        scheme = urllib.parse.urlsplit(url).scheme
++        if scheme == 'file':
++            return urllib.request.url2pathname(urllib.parse.urlparse(url).path)
++        # raise error if not allowed
++        self.url_ok(url, True)
++        return self._attempt_download(url, filename)
+ 
+     def scan_url(self, url):
+         self.process_url(url, True)
+
+From 4d54fa77943c78f393217b2931665d3ab64cd3f2 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 10:46:34 -0400
+Subject: [PATCH 05/10] Extract _resolve_vcs for resolving a VCS from a URL.
+
+---
+ setuptools/package_index.py | 34 +++++++++++++++++++++++++---------
+ 1 file changed, 25 insertions(+), 9 deletions(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index 5a3e9db2a2..8d46a70c47 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -1,5 +1,6 @@
+ """PyPI and direct package downloading."""
+ 
++import contextlib
+ import sys
+ import os
+ import re
+@@ -587,7 +588,7 @@ def download(self, spec, tmpdir):
+             scheme = URL_SCHEME(spec)
+             if scheme:
+                 # It's a url, download it to tmpdir
+-                found = self._download_url(scheme.group(1), spec, tmpdir)
++                found = self._download_url(spec, tmpdir)
+                 base, fragment = egg_info_for_url(spec)
+                 if base.endswith('.py'):
+                     found = self.gen_setup(found, fragment, tmpdir)
+@@ -816,7 +817,7 @@ def open_url(self, url, warning=None):  # noqa: C901  # is too complex (12)
+             else:
+                 raise DistutilsError("Download error for %s: %s" % (url, v)) from v
+ 
+-    def _download_url(self, scheme, url, tmpdir):
++    def _download_url(self, url, tmpdir):
+         # Determine download filename
+         #
+         name, fragment = egg_info_for_url(url)
+@@ -833,14 +834,29 @@ def _download_url(self, scheme, url, tmpdir):
+ 
+         return self._download_vcs(url, filename) or self._download_other(url, filename)
+ 
+-    def _download_vcs(self, url, filename):
++    @staticmethod
++    def _resolve_vcs(url):
++        """
++        >>> rvcs = PackageIndex._resolve_vcs
++        >>> rvcs('git+http://foo/bar')
++        'git'
++        >>> rvcs('hg+https://foo/bar')
++        'hg'
++        >>> rvcs('git:myhost')
++        'git'
++        >>> rvcs('hg:myhost')
++        >>> rvcs('http://foo/bar')
++        """
+         scheme = urllib.parse.urlsplit(url).scheme
+-        if scheme == 'svn' or scheme.startswith('svn+'):
+-            return self._download_svn(url, filename)
+-        elif scheme == 'git' or scheme.startswith('git+'):
+-            return self._download_git(url, filename)
+-        elif scheme.startswith('hg+'):
+-            return self._download_hg(url, filename)
++        pre, sep, post = scheme.partition('+')
++        # svn and git have their own protocol; hg does not
++        allowed = set(['svn', 'git'] + ['hg'] * bool(sep))
++        return next(iter({pre} & allowed), None)
++
++    def _download_vcs(self, url, filename):
++        vcs = self._resolve_vcs(url)
++        with contextlib.suppress(AttributeError):
++            return getattr(self, f'_download_{vcs}')(url, filename)
+ 
+     def _download_other(self, url, filename):
+         scheme = urllib.parse.urlsplit(url).scheme
+
+From cf18f716c1fe638d812d487f61aa987101a763a8 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 10:55:48 -0400
+Subject: [PATCH 06/10] Consolidated all _download_vcs methods into one.
+
+---
+ setuptools/package_index.py | 68 +++++++++++++------------------------
+ 1 file changed, 23 insertions(+), 45 deletions(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index 8d46a70c47..ba7819304f 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -1,6 +1,5 @@
+ """PyPI and direct package downloading."""
+ 
+-import contextlib
+ import sys
+ import os
+ import re
+@@ -853,10 +852,30 @@ def _resolve_vcs(url):
+         allowed = set(['svn', 'git'] + ['hg'] * bool(sep))
+         return next(iter({pre} & allowed), None)
+ 
+-    def _download_vcs(self, url, filename):
++    def _download_vcs(self, url, spec_filename):
+         vcs = self._resolve_vcs(url)
+-        with contextlib.suppress(AttributeError):
+-            return getattr(self, f'_download_{vcs}')(url, filename)
++        if not vcs:
++            return
++        if vcs == 'svn':
++            raise DistutilsError(
++                f"Invalid config, SVN download is not supported: {url}"
++            )
++
++        filename, _, _ = spec_filename.partition('#')
++        url, rev = self._vcs_split_rev_from_url(url)
++
++        self.info(f"Doing {vcs} clone from {url} to {filename}")
++        os.system(f"{vcs} clone --quiet {url} {filename}")
++
++        co_commands = dict(
++            git=f"git -C {filename} checkout --quiet {rev}",
++            hg=f"hg --cwd {filename} up -C -r {rev} -q",
++        )
++        if rev is not None:
++            self.info(f"Checking out {rev}")
++            os.system(co_commands[vcs])
++
++        return filename
+ 
+     def _download_other(self, url, filename):
+         scheme = urllib.parse.urlsplit(url).scheme
+@@ -880,9 +899,6 @@ def _invalid_download_html(self, url, headers, filename):
+         os.unlink(filename)
+         raise DistutilsError(f"Unexpected HTML page found at {url}")
+ 
+-    def _download_svn(self, url, _filename):
+-        raise DistutilsError(f"Invalid config, SVN download is not supported: {url}")
+-
+     @staticmethod
+     def _vcs_split_rev_from_url(url):
+         """
+@@ -915,44 +931,6 @@ def _vcs_split_rev_from_url(url):
+ 
+         return resolved, rev
+ 
+-    def _download_git(self, url, filename):
+-        filename = filename.split('#', 1)[0]
+-        url, rev = self._vcs_split_rev_from_url(url)
+-
+-        self.info("Doing git clone from %s to %s", url, filename)
+-        os.system("git clone --quiet %s %s" % (url, filename))
+-
+-        if rev is not None:
+-            self.info("Checking out %s", rev)
+-            os.system(
+-                "git -C %s checkout --quiet %s"
+-                % (
+-                    filename,
+-                    rev,
+-                )
+-            )
+-
+-        return filename
+-
+-    def _download_hg(self, url, filename):
+-        filename = filename.split('#', 1)[0]
+-        url, rev = self._vcs_split_rev_from_url(url)
+-
+-        self.info("Doing hg clone from %s to %s", url, filename)
+-        os.system("hg clone --quiet %s %s" % (url, filename))
+-
+-        if rev is not None:
+-            self.info("Updating to %s", rev)
+-            os.system(
+-                "hg --cwd %s up -C -r %s -q"
+-                % (
+-                    filename,
+-                    rev,
+-                )
+-            )
+-
+-        return filename
+-
+     def debug(self, msg, *args):
+         log.debug(msg, *args)
+ 
+
+From f0cda0b9a3cf9d81844738ba96b1df95e2abb799 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 11:40:10 -0400
+Subject: [PATCH 07/10] Replace os.system calls with subprocess calls.
+
+---
+ setup.cfg                             |  1 +
+ setuptools/package_index.py           |  9 +++---
+ setuptools/tests/test_packageindex.py | 46 ++++++++++++---------------
+ 3 files changed, 27 insertions(+), 29 deletions(-)
+
+diff --git a/setup.cfg b/setup.cfg
+index 68be6c8e7c..1226c940fc 100644
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -76,6 +76,7 @@ testing =
+ 	tomli
+ 	# No Python 3.12 dependencies require importlib_metadata, but needed for type-checking since we import it directly
+ 	importlib_metadata
++	pytest-subprocess
+ 
+ 	# workaround for pypa/setuptools#4333
+ 	pyproject-hooks!=1.1
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index ba7819304f..bbc5846ed9 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -1,6 +1,7 @@
+ """PyPI and direct package downloading."""
+ 
+ import sys
++import subprocess
+ import os
+ import re
+ import io
+@@ -865,15 +866,15 @@ def _download_vcs(self, url, spec_filename):
+         url, rev = self._vcs_split_rev_from_url(url)
+ 
+         self.info(f"Doing {vcs} clone from {url} to {filename}")
+-        os.system(f"{vcs} clone --quiet {url} {filename}")
++        subprocess.check_call([vcs, 'clone', '--quiet', url, filename])
+ 
+         co_commands = dict(
+-            git=f"git -C {filename} checkout --quiet {rev}",
+-            hg=f"hg --cwd {filename} up -C -r {rev} -q",
++            git=[vcs, '-C', filename, 'checkout', '--quiet', rev],
++            hg=[vcs, '--cwd', filename, 'up', '-C', '-r', rev, '-q'],
+         )
+         if rev is not None:
+             self.info(f"Checking out {rev}")
+-            os.system(co_commands[vcs])
++            subprocess.check_call(co_commands[vcs])
+ 
+         return filename
+ 
+diff --git a/setuptools/tests/test_packageindex.py b/setuptools/tests/test_packageindex.py
+index 93474ae5af..2776ba9f63 100644
+--- a/setuptools/tests/test_packageindex.py
++++ b/setuptools/tests/test_packageindex.py
+@@ -3,7 +3,6 @@
+ import urllib.error
+ import http.client
+ from inspect import cleandoc
+-from unittest import mock
+ 
+ import pytest
+ 
+@@ -171,41 +170,38 @@ def test_egg_fragment(self):
+             assert dists[0].version == ''
+             assert dists[1].version == vc
+ 
+-    def test_download_git_with_rev(self, tmpdir):
++    def test_download_git_with_rev(self, tmpdir, fp):
+         url = 'git+https://github.example/group/project@master#egg=foo'
+         index = setuptools.package_index.PackageIndex()
+ 
+-        with mock.patch("os.system") as os_system_mock:
+-            result = index.download(url, str(tmpdir))
++        expected_dir = str(tmpdir / 'project@master')
++        fp.register([
++            'git',
++            'clone',
++            '--quiet',
++            'https://github.example/group/project',
++            expected_dir,
++        ])
++        fp.register(['git', '-C', expected_dir, 'checkout', '--quiet', 'master'])
+ 
+-        os_system_mock.assert_called()
++        result = index.download(url, str(tmpdir))
+ 
+-        expected_dir = str(tmpdir / 'project@master')
+-        expected = (
+-            'git clone --quiet ' 'https://github.example/group/project {expected_dir}'
+-        ).format(**locals())
+-        first_call_args = os_system_mock.call_args_list[0][0]
+-        assert first_call_args == (expected,)
+-
+-        tmpl = 'git -C {expected_dir} checkout --quiet master'
+-        expected = tmpl.format(**locals())
+-        assert os_system_mock.call_args_list[1][0] == (expected,)
+         assert result == expected_dir
++        assert len(fp.calls) == 2
+ 
+-    def test_download_git_no_rev(self, tmpdir):
++    def test_download_git_no_rev(self, tmpdir, fp):
+         url = 'git+https://github.example/group/project#egg=foo'
+         index = setuptools.package_index.PackageIndex()
+ 
+-        with mock.patch("os.system") as os_system_mock:
+-            result = index.download(url, str(tmpdir))
+-
+-        os_system_mock.assert_called()
+-
+         expected_dir = str(tmpdir / 'project')
+-        expected = (
+-            'git clone --quiet ' 'https://github.example/group/project {expected_dir}'
+-        ).format(**locals())
+-        os_system_mock.assert_called_once_with(expected)
++        fp.register([
++            'git',
++            'clone',
++            '--quiet',
++            'https://github.example/group/project',
++            expected_dir,
++        ])
++        index.download(url, str(tmpdir))
+ 
+     def test_download_svn(self, tmpdir):
+         url = 'svn+https://svn.example/project#egg=foo'
+
+From a36b1121d817ef82aef0971aaa37989941019c8f Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 11:55:20 -0400
+Subject: [PATCH 08/10] Prefer tmp_path fixture.
+
+---
+ setuptools/tests/test_packageindex.py | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/setuptools/tests/test_packageindex.py b/setuptools/tests/test_packageindex.py
+index 2776ba9f63..f5f37e0563 100644
+--- a/setuptools/tests/test_packageindex.py
++++ b/setuptools/tests/test_packageindex.py
+@@ -170,11 +170,11 @@ def test_egg_fragment(self):
+             assert dists[0].version == ''
+             assert dists[1].version == vc
+ 
+-    def test_download_git_with_rev(self, tmpdir, fp):
++    def test_download_git_with_rev(self, tmp_path, fp):
+         url = 'git+https://github.example/group/project@master#egg=foo'
+         index = setuptools.package_index.PackageIndex()
+ 
+-        expected_dir = str(tmpdir / 'project@master')
++        expected_dir = tmp_path / 'project@master'
+         fp.register([
+             'git',
+             'clone',
+@@ -184,16 +184,16 @@ def test_download_git_with_rev(self, tmpdir, fp):
+         ])
+         fp.register(['git', '-C', expected_dir, 'checkout', '--quiet', 'master'])
+ 
+-        result = index.download(url, str(tmpdir))
++        result = index.download(url, tmp_path)
+ 
+-        assert result == expected_dir
++        assert result == str(expected_dir)
+         assert len(fp.calls) == 2
+ 
+-    def test_download_git_no_rev(self, tmpdir, fp):
++    def test_download_git_no_rev(self, tmp_path, fp):
+         url = 'git+https://github.example/group/project#egg=foo'
+         index = setuptools.package_index.PackageIndex()
+ 
+-        expected_dir = str(tmpdir / 'project')
++        expected_dir = tmp_path / 'project'
+         fp.register([
+             'git',
+             'clone',
+@@ -201,15 +201,15 @@ def test_download_git_no_rev(self, tmpdir, fp):
+             'https://github.example/group/project',
+             expected_dir,
+         ])
+-        index.download(url, str(tmpdir))
++        index.download(url, tmp_path)
+ 
+-    def test_download_svn(self, tmpdir):
++    def test_download_svn(self, tmp_path):
+         url = 'svn+https://svn.example/project#egg=foo'
+         index = setuptools.package_index.PackageIndex()
+ 
+         msg = r".*SVN download is not supported.*"
+         with pytest.raises(distutils.errors.DistutilsError, match=msg):
+-            index.download(url, str(tmpdir))
++            index.download(url, tmp_path)
+ 
+ 
+ class TestContentCheckers:
+
+From 1a0cbf5f59b5fa1debb4b46fd5e1c41ebc2344dd Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 17:07:40 -0400
+Subject: [PATCH 09/10] Add news fragment.
+
+---
+ newsfragments/4332.feature.rst | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 newsfragments/4332.feature.rst
+
+diff --git a/newsfragments/4332.feature.rst b/newsfragments/4332.feature.rst
+new file mode 100644
+index 0000000000..9f46298adc
+--- /dev/null
++++ b/newsfragments/4332.feature.rst
+@@ -0,0 +1 @@
++Modernized and refactored VCS handling in package_index.
+\ No newline at end of file
+
+From 9bc2e87fc74e726927d208438385956591c96aa5 Mon Sep 17 00:00:00 2001
+From: "Jason R. Coombs" <jaraco@jaraco.com>
+Date: Mon, 29 Apr 2024 17:29:45 -0400
+Subject: [PATCH 10/10] Ignore coverage for file urls.
+
+---
+ setuptools/package_index.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/setuptools/package_index.py b/setuptools/package_index.py
+index bbc5846ed9..c3ffee41a7 100644
+--- a/setuptools/package_index.py
++++ b/setuptools/package_index.py
+@@ -880,7 +880,7 @@ def _download_vcs(self, url, spec_filename):
+ 
+     def _download_other(self, url, filename):
+         scheme = urllib.parse.urlsplit(url).scheme
+-        if scheme == 'file':
++        if scheme == 'file':  # pragma: no cover
+             return urllib.request.url2pathname(urllib.parse.urlparse(url).path)
+         # raise error if not allowed
+         self.url_ok(url, True)

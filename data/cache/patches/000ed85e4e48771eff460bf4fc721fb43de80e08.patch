@@ -1,0 +1,355 @@
+From 000ed85e4e48771eff460bf4fc721fb43de80e08 Mon Sep 17 00:00:00 2001
+From: Mike Bayer <mike_mp@zzzcomputing.com>
+Date: Tue, 22 Sep 2026 15:53:38 -0400
+Subject: [PATCH] Fix path traversal via drive designator URI on Windows in
+ TemplateLookup
+
+The directory traversal check in Template.__init__ normalized the URI
+using os.path, which on Windows is ntpath, while TemplateLookup.
+get_template() resolves the URI to a file using posixpath.  The two
+modules disagree about a drive designator: posixpath has no notion of
+one and treats "C:" as an ordinary path component, so the ".." segments
+of a URI such as "C:/../../secret.txt" escape the template root, while
+ntpath splits the drive off, treats the remainder as rooted and absorbs
+those same ".." segments, leaving nothing for the check to inspect.
+The check therefore could not fire for any URI beginning with a drive
+designator, and arbitrary readable files outside of the template
+directory could be loaded.
+
+Normalization in Template.__init__ is now performed with posixpath, the
+same module get_template() already commits to, so that both sides of
+the operation agree on what the URI means.
+
+This is a third instance of the same posixpath/os.path mismatch behind
+the fixes for #434 and #435; both of those remain effective on their
+own terms and neither covers this form, as each normalized a separator
+spelling rather than the drive designator.
+
+The per-form traversal tests added for #434 and #435 are consolidated
+into a single parametrized test in each of test_lookup.py and
+test_template.py, running every spelling of the traversal against both
+posixpath and ntpath.  All three forms are then covered by one matrix,
+and reverting any one of the three fixes fails only the rows belonging
+to it.
+
+Fixes: #441
+Change-Id: I7ad8cc85d0514ff4120b5ace28010a6770070a8a
+---
+ doc/build/unreleased/441.rst |  13 ++++
+ mako/template.py             |   8 ++-
+ test/test_lookup.py          | 130 ++++++++++++++++++-----------------
+ test/test_template.py        |  82 ++++++++++++++++------
+ 4 files changed, 148 insertions(+), 85 deletions(-)
+ create mode 100644 doc/build/unreleased/441.rst
+
+diff --git a/doc/build/unreleased/441.rst b/doc/build/unreleased/441.rst
+new file mode 100644
+index 00000000..e9459bc4
+--- /dev/null
++++ b/doc/build/unreleased/441.rst
+@@ -0,0 +1,13 @@
++.. change::
++    :tags: bug, template
++    :tickets: 441
++
++    Fixed issue in :class:`.TemplateLookup` where a URI beginning with a drive
++    designator (e.g. ``C:/../../secret.txt``) could bypass the directory
++    traversal check on Windows, allowing reads of arbitrary files outside of
++    the template directory.  The check in :class:`.Template` normalized the URI
++    using ``os.path``, which on Windows is ``ntpath``; as ``ntpath`` splits the
++    drive designator off and treats the remainder as rooted, the ``..``
++    segments were absorbed before the check could inspect them.  Normalization
++    is now performed with ``posixpath``, which is the same module used by
++    :meth:`.TemplateLookup.get_template` to resolve the URI to a file.
+diff --git a/mako/template.py b/mako/template.py
+index 40a5ecdd..af5231a6 100644
+--- a/mako/template.py
++++ b/mako/template.py
+@@ -12,6 +12,7 @@
+ from importlib import machinery
+ import json
+ import os
++import posixpath
+ import re
+ import shutil
+ import stat
+@@ -265,7 +266,12 @@ def __init__(
+             self.uri = self.module_id
+ 
+         u_norm = self.uri.replace("\\", "/").lstrip("/")
+-        u_norm = os.path.normpath(u_norm)
++        # use posixpath, not os.path, to normalize; this is the same
++        # module used by TemplateLookup to resolve the URI to a file,
++        # and unlike ntpath it has no notion of a drive designator, so
++        # a URI like "C:/../../secret.txt" retains its ".." segments
++        # here rather than having them absorbed into a drive root.
++        u_norm = posixpath.normpath(u_norm)
+         if u_norm.startswith(".."):
+             raise exceptions.TemplateLookupException(
+                 'Template uri "%s" is invalid - '
+diff --git a/test/test_lookup.py b/test/test_lookup.py
+index 3d338eed..54e5cda4 100644
+--- a/test/test_lookup.py
++++ b/test/test_lookup.py
+@@ -1,12 +1,18 @@
++import contextlib
++import ntpath
+ import os
++import posixpath
+ import tempfile
+ 
++import pytest
++
+ from mako import exceptions
+ from mako import lookup
+ from mako import runtime
+ from mako.template import Template
+ from mako.testing.assertions import assert_raises_message
+ from mako.testing.assertions import assert_raises_with_given_cause
++from mako.testing.assertions import eq_
+ from mako.testing.config import config
+ from mako.testing.helpers import file_with_template_code
+ from mako.testing.helpers import replace_file_with_dir
+@@ -127,50 +133,64 @@ def test_dont_accept_relative_outside_of_root(self):
+         # this is OK since the .. cancels out
+         runtime._lookup_template(ctx, "foo/../index.html", index.uri)
+ 
+-    def test_dont_accept_relative_outside_of_root_via_double_slash(self):
+-        """test that double-slash URI prefix can't bypass the
+-        path traversal check"""
+-        with tempfile.TemporaryDirectory() as base:
+-            tmpl_dir = os.path.join(base, "app", "templates")
+-            os.makedirs(tmpl_dir)
+-            with open(os.path.join(tmpl_dir, "index.html"), "w") as f:
+-                f.write("Hello")
+-
+-            secret = os.path.join(base, "secrets", "creds.txt")
+-            os.makedirs(os.path.dirname(secret))
+-            with open(secret, "w") as f:
+-                f.write("SECRET_KEY=supersecret123")
+-
++    @pytest.mark.parametrize(
++        "ospath", [posixpath, ntpath], ids=["posix", "windows"]
++    )
++    @pytest.mark.parametrize(
++        "uri",
++        [
++            # plain relative traversal
++            "../../secrets/creds.txt",
++            "/../../secrets/creds.txt",
++            # leading slash prefixes; #434
++            "//../../secrets/creds.txt",
++            "///../../secrets/creds.txt",
++            # backslash separators; #435
++            "..\\..\\secrets\\creds.txt",
++            "\\..\\..\\secrets\\creds.txt",
++            # drive designators; #441.  the drive designator itself
++            # consumes one level of the posixpath resolution, hence the
++            # extra ".." relative to the forms above
++            "C:/../../../secrets/creds.txt",
++            "c:/../../../secrets/creds.txt",
++            "C:\\..\\..\\..\\secrets\\creds.txt",
++            "/C:/../../../secrets/creds.txt",
++            "//C:/../../../secrets/creds.txt",
++        ],
++    )
++    def test_dont_accept_traversal_outside_of_root(self, uri, ospath):
++        """test that no spelling of a traversal URI can bypass the
++        path traversal check, on either platform.
++
++        The URIs above are all spellings of the same traversal, and all
++        must be refused whether ``os.path`` is ``posixpath`` or
++        ``ntpath``; the backslash and drive designator forms are only
++        distinguishable from a plain traversal under ``ntpath``.
++
++        """
++        with self._traversal_fixture() as tmpl_dir:
+             tl = lookup.TemplateLookup(directories=[tmpl_dir])
+-            rel = os.path.relpath(secret, tmpl_dir)
+-
+-            # single-slash prefix should also be blocked
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                "/" + rel,
+-            )
+ 
+-            # double-slash prefix must not bypass the check
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                "//" + rel,
+-            )
++            current_path = os.path
++            os.path = ospath
++            try:
++                assert_raises_message(
++                    exceptions.TemplateLookupException,
++                    "cannot be relative outside of the root path",
++                    tl.get_template,
++                    uri,
++                )
++
++                # a template within the root still resolves
++                eq_(tl.get_template("index.html").render(), "Hello")
++            finally:
++                os.path = current_path
++
++    @contextlib.contextmanager
++    def _traversal_fixture(self):
++        """set up a template directory with a file to be reached outside
++        of it, laid out to match the literal URIs used above."""
+ 
+-            # triple-slash prefix must not bypass the check
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                "///" + rel,
+-            )
+-
+-    def test_dont_accept_relative_outside_of_root_via_backslash(self):
+-        """test that backslash traversal URI can't bypass the
+-        path traversal check"""
+         with tempfile.TemporaryDirectory() as base:
+             tmpl_dir = os.path.join(base, "app", "templates")
+             os.makedirs(tmpl_dir)
+@@ -182,31 +202,13 @@ def test_dont_accept_relative_outside_of_root_via_backslash(self):
+             with open(secret, "w") as f:
+                 f.write("SECRET_KEY=supersecret123")
+ 
+-            tl = lookup.TemplateLookup(directories=[tmpl_dir])
+-            rel = os.path.relpath(secret, tmpl_dir).replace("/", "\\")
+-
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                rel,
++            # keep the literal URIs above honest
++            eq_(
++                os.path.relpath(secret, tmpl_dir).replace(os.sep, "/"),
++                "../../secrets/creds.txt",
+             )
+ 
+-            # with leading backslash
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                "\\" + rel,
+-            )
+-
+-            # with leading forward slash
+-            assert_raises_message(
+-                exceptions.TemplateLookupException,
+-                "cannot be relative outside of the root path",
+-                tl.get_template,
+-                "/" + rel,
+-            )
++            yield tmpl_dir
+ 
+     def test_checking_against_bad_filetype(self):
+         with tempfile.TemporaryDirectory() as tempdir:
+diff --git a/test/test_template.py b/test/test_template.py
+index f64fa020..36bf47a2 100644
+--- a/test/test_template.py
++++ b/test/test_template.py
+@@ -1,4 +1,7 @@
++import ntpath
+ import os
++import posixpath
++import re
+ 
+ import pytest
+ 
+@@ -1463,28 +1466,67 @@ def _compile_from_file(self, path, filename):
+         finally:
+             os.path = current_path
+ 
+-    def test_dont_accept_relative_outside_of_root(self):
+-        assert_raises_message(
+-            exceptions.TemplateLookupException,
+-            'Template uri "../../foo.html" is invalid - it '
+-            "cannot be relative outside of the root path",
+-            Template,
+-            "test",
+-            uri="../../foo.html",
+-        )
++    @pytest.mark.parametrize(
++        "ospath", [posixpath, ntpath], ids=["posix", "windows"]
++    )
++    @pytest.mark.parametrize(
++        "uri",
++        [
++            # plain relative traversal
++            "../../foo.html",
++            "/../../foo.html",
++            # leading slash prefixes; #434
++            "//../../foo.html",
++            "///../../foo.html",
++            # backslash separators; #435
++            "..\\..\\foo.html",
++            "\\..\\..\\foo.html",
++            # drive designators; #441
++            "C:/../../foo.html",
++            "c:/../../foo.html",
++            "C:\\..\\..\\foo.html",
++            "/C:/../../foo.html",
++            "//C:/../../foo.html",
++        ],
++    )
++    def test_dont_accept_relative_outside_of_root(self, uri, ospath):
++        """test that no spelling of a traversal URI passes the check in
++        :class:`.Template`, on either platform."""
+ 
+-        assert_raises_message(
+-            exceptions.TemplateLookupException,
+-            'Template uri "/../../foo.html" is invalid - it '
+-            "cannot be relative outside of the root path",
+-            Template,
+-            "test",
+-            uri="/../../foo.html",
+-        )
++        current_path = os.path
++        os.path = ospath
++        try:
++            # assert_raises_message matches as a regexp, so the
++            # backslash forms have to be escaped
++            assert_raises_message(
++                exceptions.TemplateLookupException,
++                re.escape(
++                    'Template uri "%s" is invalid - it '
++                    "cannot be relative outside of the root path" % uri
++                ),
++                Template,
++                "test",
++                uri=uri,
++            )
++        finally:
++            os.path = current_path
+ 
+-        # normalizes in the root is OK
+-        t = Template("test", uri="foo/bar/../../foo.html")
+-        eq_(t.uri, "foo/bar/../../foo.html")
++    @pytest.mark.parametrize(
++        "ospath", [posixpath, ntpath], ids=["posix", "windows"]
++    )
++    @pytest.mark.parametrize(
++        "uri", ["foo/bar/../../foo.html", "C:/foo/../foo.html"]
++    )
++    def test_accept_relative_normalizing_inside_root(self, uri, ospath):
++        """test that a traversal which cancels out within the root is
++        still accepted, including below a drive designator."""
++
++        current_path = os.path
++        os.path = ospath
++        try:
++            eq_(Template("test", uri=uri).uri, uri)
++        finally:
++            os.path = current_path
+ 
+ 
+ class ModuleTemplateTest(TemplateTest):

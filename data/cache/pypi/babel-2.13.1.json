@@ -1,0 +1,1 @@
+["pytz >=2015.7 ; python_version < \"3.9\"", "setuptools ; python_version >= \"3.12\"", "pytest >=6.0 ; extra == 'dev'", "pytest-cov ; extra == 'dev'", "freezegun ~=1.0 ; extra == 'dev'"]

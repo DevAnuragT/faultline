@@ -1,4 +1,48 @@
 {
+ "GHSA-248v-346w-9cwc": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "Fix commit does not touch functions in the analyzed release",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-29vq-49wr-vm6x": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/f407712fdc60a09c2b3f4fe7db557703e5d9338d",
+  "rationale": "The fix updates the safe_join function to correctly check individual path segments in multi-segment paths against Windows special device names.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.security.safe_join"
+  ]
+ },
+ "GHSA-2g68-c3qc-8985": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/3386395b24c7371db11a5b8eaac0c91da5362692",
+  "rationale": "The DebuggedApplication.__call__ method was updated to check request host against trusted_hosts, mitigating remote execution vulnerabilities from untrusted domains.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.debug.DebuggedApplication.__call__"
+  ]
+ },
+ "GHSA-2gx3-rcp4-g85q": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/ba4853a75fb9676362da17f67d0f64bd18afd4e1",
+  "rationale": "The vulnerability allowed unauthenticated attackers to trigger excessive JWKS fetches by providing unknown kid values. The fix introduces a cooldown mechanism within get_signing_key to prevent these repeated forced refreshes.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.jwks_client.PyJWKClient.get_signing_key"
+  ]
+ },
+ "GHSA-2h4p-vjrc-8xpq": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/sqlalchemy/mako/commit/72e10c573ca0fbcbddd4455abca8ce92a61780d7",
+  "rationale": "The vulnerability arises because backslashes in URIs are treated as literal characters by posixpath but as path separators by os.path on Windows, allowing traversal. The fix involves normalizing backslashes to forward slashes in both TemplateLookup.get_template and Template.__init__ before path validation.",
+  "source": "gemini",
+  "symbols": [
+   "mako.lookup.TemplateLookup.get_template",
+   "mako.template.Template.__init__"
+  ]
+ },
  "GHSA-2xpw-w6gg-jr37": {
   "confidence": 0.9,
   "patch_url": "https://github.com/urllib3/urllib3/commit/c19571de34c47de3a766541b041637ba5f716ed7",
@@ -25,6 +69,76 @@
    "urllib3.response.HTTPResponse.drain_conn"
   ]
  },
+ "GHSA-3rq5-2g8h-59hc": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/rthalley/dnspython/commit/0ea5ad0a4583e1f519b9bcc67cfac381230d9cf2",
+  "rationale": "Both dns.asyncquery.receive_udp and dns.query.receive_udp were vulnerable to TuDoor attacks because injected invalid or truncated DNS response packets could break the loop prematurely instead of being ignored, which was fixed by checking query responses before raising truncation exceptions.",
+  "source": "gemini",
+  "symbols": [
+   "dns.asyncquery.receive_udp",
+   "dns.query.receive_udp"
+  ]
+ },
+ "GHSA-42vr-xj54-vc7v": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/5fde08a6cf906aa7698de2d6391d88b73006b17b",
+  "rationale": "The function _decode_payload failed to catch RecursionError during JSON parsing of the payload, allowing a DoS via deeply nested JSON structures. The fix adds RecursionError to the exception handler.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.api_jwt.PyJWT._decode_payload"
+  ]
+ },
+ "GHSA-5639-2j2p-m4mx": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/sqlalchemy/mako/commit/000ed85e4e48771eff460bf4fc721fb43de80e08",
+  "rationale": "The vulnerability was caused by using os.path.normpath (which resolves to ntpath on Windows) to validate URIs, allowing drive letters to absorb traversal segments. The fix replaces this with posixpath.normpath in mako.template.Template.__init__ to ensure consistent path normalization.",
+  "source": "gemini",
+  "symbols": [
+   "mako.template.Template.__init__"
+  ]
+ },
+ "GHSA-5rjg-fvgr-3xxf": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pypa/setuptools/commit/250a6d17978f9f6ac3ac887091f2d32886fbbb0b",
+  "rationale": "The vulnerability exists because the filename derived from the URL is not properly validated against the target directory, allowing path traversal. The fix introduces a check to ensure the resolved path remains within the intended tmpdir.",
+  "source": "gemini",
+  "symbols": [
+   "setuptools.package_index.PackageIndex._download_url"
+  ]
+ },
+ "GHSA-65pc-fj4g-8rjx": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-68rp-wp8r-4726": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/pallets/flask/commit/089cb86dd22bff589a4eafb7ab8e42dc357623b4",
+  "rationale": "In vulnerable releases, session access tracking relied on overriding methods like __getitem__ and get on SecureCookieSession, which failed to account for dictionary operations like 'in' (__contains__) or len(). The fix removes these methods in favor of tracking session access on RequestContext whenever the session object is accessed.",
+  "source": "gemini",
+  "symbols": [
+   "flask.sessions.SecureCookieSession.__getitem__",
+   "flask.sessions.SecureCookieSession.get"
+  ]
+ },
+ "GHSA-752w-5fwx-jx9f": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-87hc-h4r5-73f7": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/7ae1d254e04a0c33e241ac1cca4783ce6c875ca3",
+  "rationale": "The fix modifies the safe_join function in werkzeug/security.py to properly block Windows special device names with compound extensions and trailing spaces.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.security.safe_join"
+  ]
+ },
  "GHSA-8988-9cw3-xx77": {
   "confidence": 1.0,
   "patch_url": "https://github.com/urllib3/urllib3/commit/07408cec79d1856d81bb42c74a904a24fdb9e465",
@@ -35,6 +149,13 @@
    "urllib3.connection.HTTPSConnection._connect_tls_proxy"
   ]
  },
+ "GHSA-993g-76c3-p5m4": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
  "GHSA-9hjg-9r4m-mvj7": {
   "confidence": 1.0,
   "patch_url": "https://github.com/psf/requests/commit/96ba401c1296ab1dda74a2365ef36d88f7d144ef",
@@ -42,6 +163,15 @@
   "source": "gemini",
   "symbols": [
    "requests.utils.get_netrc_auth"
+  ]
+ },
+ "GHSA-9v7f-9g4p-ffgj": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/0a795b8e1f6ef08f634aa7086fc41cc6d5ce3e56",
+  "rationale": "The fetch_data method was modified to use a custom opener with a _NoRedirectHandler to prevent the client from automatically following HTTP redirects, which was the root cause of the vulnerability.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.jwks_client.PyJWKClient.fetch_data"
   ]
  },
  "GHSA-9wx4-h78v-vm56": {
@@ -63,6 +193,41 @@
    "jinja2.filters.do_attr"
   ]
  },
+ "GHSA-cx63-2mw6-8hw5": {
+  "confidence": 0.9,
+  "patch_url": "https://github.com/pypa/setuptools/commit/88807c7062788254f654ea8c03427adc859321f0",
+  "rationale": "The functions _download_git and _download_hg use os.system to execute shell commands with unsanitized URLs, which is the primary vector for the command injection vulnerability.",
+  "source": "gemini",
+  "symbols": [
+   "setuptools.package_index.PackageIndex._download_git",
+   "setuptools.package_index.PackageIndex._download_hg"
+  ]
+ },
+ "GHSA-f9vj-2wh5-fj8j": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/2767bcb10a7dd1c297d812cc5e6d11a474c1f092",
+  "rationale": "The fix updates the safe_join function to explicitly check for absolute paths starting with a slash on Windows where os.path.isabs fails to catch them on Python < 3.11.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.security.safe_join"
+  ]
+ },
+ "GHSA-ffc3-869f-jxw9": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/8b4e233a22206b34ec1186e912e75c0b2396ac07",
+  "rationale": "The function is_pem_format used a restrictive regex that failed to identify valid PEM variants accepted by the underlying cryptography library, allowing attackers to bypass the asymmetric-to-HMAC confusion guard.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.utils.is_pem_format"
+  ]
+ },
+ "GHSA-fhv5-28vv-h8m8": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
  "GHSA-g4mx-q9vg-27p4": {
   "confidence": 1.0,
   "patch_url": "https://github.com/urllib3/urllib3/commit/4e50fbc5db74e32cabd5ccc1ab81fc103adfe0b3",
@@ -71,6 +236,15 @@
   "symbols": [
    "urllib3.poolmanager.PoolManager.urlopen",
    "urllib3.connectionpool.HTTPConnectionPool.urlopen"
+  ]
+ },
+ "GHSA-g6x2-hccm-hh4m": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/8d77320bcdf3a34941ec06dcf16b03c065cd21b6",
+  "rationale": "The vulnerability is in safe_join where Windows special device names with empty ADS markers are not properly filtered, and the fix in the diff updates the check in werkzeug.security.safe_join.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.security.safe_join"
   ]
  },
  "GHSA-gc5v-m9x4-r6x2": {
@@ -110,6 +284,15 @@
    "jinja2.compiler.CodeGenerator.visit_FromImport"
   ]
  },
+ "GHSA-h35f-9h28-mq5c": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/pypa/setuptools/commit/dd9f436a36486b4cb8a4c70a2321548b0be09b8f",
+  "rationale": "The vulnerability is caused by byte-for-byte matching of MANIFEST.in patterns without Unicode normalization, which is fixed by updating translate_pattern to use a normalized matcher.",
+  "source": "gemini",
+  "symbols": [
+   "setuptools.command.egg_info.translate_pattern"
+  ]
+ },
  "GHSA-h5c8-rqwp-cp95": {
   "confidence": 1.0,
   "patch_url": "https://github.com/pallets/jinja/commit/716795349a41d4983a9a4771f7d883c96ea17be7",
@@ -128,6 +311,33 @@
    "jinja2.filters.do_xmlattr"
   ]
  },
+ "GHSA-hgf8-39gv-g3f2": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/4b833376a45c323a189cd11d2362bcffdb1c0c13",
+  "rationale": "The fix directly modifies the safe_join function in werkzeug/security.py to reject Windows special device names.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.security.safe_join"
+  ]
+ },
+ "GHSA-hrfv-mqp8-q5rw": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/b1916c0c083e0be1c9d887ee2f3d696922bfc5c1",
+  "rationale": "The fix modifies the logic within the multipart parsing process to prevent the inefficient accumulation of data in the buffer when searching for boundaries, directly addressing the DoS vulnerability.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.sansio.multipart.MultipartDecoder.next_event"
+  ]
+ },
+ "GHSA-hxm8-2xgr-2p9m": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/e6f48401001609a8f99e71fcaf355fb895d508a8",
+  "rationale": "The _load method was responsible for decoding JWT segments without enforcing canonical Base64URL encoding, allowing non-canonical segments to be accepted. The fix introduces _decode_base64url_segment to validate that segments strictly adhere to the Base64URL alphabet and padding requirements.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.api_jws.PyJWS._load"
+  ]
+ },
  "GHSA-j8r2-6x86-q33q": {
   "confidence": 1.0,
   "patch_url": "https://github.com/psf/requests/commit/74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5",
@@ -137,12 +347,56 @@
    "requests.sessions.SessionRedirectMixin.rebuild_proxies"
   ]
  },
+ "GHSA-jjg7-2v4v-x38h": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "Fix commit does not touch functions in the analyzed release",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-jwrc-g2q2-pq5p": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/8b4e233a22206b34ec1186e912e75c0b2396ac07",
+  "rationale": "The function is_pem_format used a regular expression with a lazy quantifier that caused O(N^2) complexity when processing malformed PEM inputs, leading to a ReDoS vulnerability. The fix replaces the vulnerable regex with a more efficient iterative approach to validate PEM markers.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.utils.is_pem_format"
+  ]
+ },
+ "GHSA-m2qf-hxjv-5gpq": {
+  "confidence": 0.5,
+  "patch_url": "https://github.com/pallets/flask/commit/70f906c51ce49c485f1d355703e9cc3386b1cc2b",
+  "rationale": "gemini failed (ServerError); highest-scoring changed function in the fix commit (score 19); not model-verified",
+  "source": "heuristic",
+  "symbols": [
+   "flask.sessions.SecureCookieSessionInterface.save_session"
+  ]
+ },
  "GHSA-mf9v-mfxr-j63j": {
   "confidence": 0.0,
   "patch_url": null,
   "rationale": "No fix commit in advisory",
   "source": "none",
   "symbols": []
+ },
+ "GHSA-mf9w-mj56-hr94": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/theskumar/python-dotenv/commit/790c5c02991100aa1bf41ee5330aca75edc51311",
+  "rationale": "The vulnerability arises because set_key and unset_key used a rewrite mechanism that followed symlinks, leading to arbitrary file overwrites. The fix modifies these functions to disable symlink following by default and updates the underlying rewrite logic to handle file operations more safely.",
+  "source": "gemini",
+  "symbols": [
+   "dotenv.main.set_key",
+   "dotenv.main.unset_key"
+  ]
+ },
+ "GHSA-p4g4-x82p-q773": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/2798504fa2663364573cf2d1043d8d7fef389499",
+  "rationale": "The vulnerability was caused by the lack of DER-encoded key detection in HMACAlgorithm.prepare_key, which allowed asymmetric keys to be used as HMAC secrets. The fix introduces a new check within this function to identify and reject DER-encoded public keys and certificates.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.algorithms.HMACAlgorithm.prepare_key"
+  ]
  },
  "GHSA-pq67-6m6q-mj2v": {
   "confidence": 1.0,
@@ -151,6 +405,24 @@
   "source": "gemini",
   "symbols": [
    "urllib3.poolmanager.PoolManager.__init__"
+  ]
+ },
+ "GHSA-pr2m-px7j-xg65": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/aio-libs/aiosmtpd/commit/24b6c79c8921cf1800e27ca144f4f37023982bbb",
+  "rationale": "The `smtp_DATA` method previously accepted bare LF (`\\n`) as line delimiters when reading email payload lines during the DATA command, allowing SMTP smuggling. The fix updates `smtp_DATA` to enforce CRLF (`\\r\\n`) line endings as mandated by RFC 5321.",
+  "source": "gemini",
+  "symbols": [
+   "aiosmtpd.smtp.SMTP.smtp_DATA"
+  ]
+ },
+ "GHSA-px8h-6qxv-m22q": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/cf275f42acad1b5950c50ffe8ef58fe62cdce028",
+  "rationale": "werkzeug._internal._cookie_parse_impl contains the low-level cookie parsing logic where the regex and handling for leading equals signs (nameless cookies) was modified to properly discard empty keys instead of stripping leading equals.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug._internal._cookie_parse_impl"
   ]
  },
  "GHSA-q2q7-5pp4-w6pg": {
@@ -172,6 +444,15 @@
    "jinja2.sandbox.SandboxedEnvironment.getitem"
   ]
  },
+ "GHSA-q34m-jh98-gwm2": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/50cfeebcb0727e18cc52ffbeb125f4a66551179b",
+  "rationale": "The fix adds accumulated memory size checks for form fields across multiple data events in the MultiPartParser.parse method to enforce max_form_memory_size correctly.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.formparser.MultiPartParser.parse"
+  ]
+ },
  "GHSA-qccp-gfcp-xxvc": {
   "confidence": 0.0,
   "patch_url": null,
@@ -186,6 +467,15 @@
   "source": "none",
   "symbols": []
  },
+ "GHSA-v92g-xgxw-vvmm": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/sqlalchemy/mako/commit/e05ac61989a7fb9dd7dcde6cfd72dc48328719a3",
+  "rationale": "The vulnerability was caused by an inconsistent stripping of leading slashes between TemplateLookup and Template.__init__. The fix updates Template.__init__ to use lstrip('/') to ensure all leading slashes are removed, preventing path traversal bypasses.",
+  "source": "gemini",
+  "symbols": [
+   "mako.template.Template.__init__"
+  ]
+ },
  "GHSA-vxq7-64xx-v4gw": {
   "confidence": 1.0,
   "patch_url": "https://github.com/urllib3/urllib3/commit/cd770b059b543be29298ea5c52afb0b1b090f5ed",
@@ -195,5 +485,54 @@
    "urllib3.response.HTTPResponse._update_chunk_length",
    "urllib3.response.HTTPResponse.read_chunked"
   ]
+ },
+ "GHSA-w7vc-732c-9m39": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
+ "GHSA-wgjv-9j3q-jhg8": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/aio-libs/aiosmtpd/commit/b3a4a2c6ecfd228856a20d637dc383541fcdbfda",
+  "rationale": "The connection_made method failed to clear leftover unencrypted data from the reader buffer during STARTTLS TLS upgrade, allowing unencrypted commands injected before TLS negotiation to be executed.",
+  "source": "gemini",
+  "symbols": [
+   "aiosmtpd.smtp.SMTP.connection_made"
+  ]
+ },
+ "GHSA-x33g-cr3x-6449": {
+  "confidence": 1.0,
+  "patch_url": "https://github.com/jpadilla/pyjwt/commit/3cd9ceec33ced359decbad75b413ad668ae6332c",
+  "rationale": "The function jwt.algorithms.OKPAlgorithm.from_jwk failed to verify that the public key 'x' matched the private key 'd' when importing an OKP JWK, allowing for key identity confusion.",
+  "source": "gemini",
+  "symbols": [
+   "jwt.algorithms.OKPAlgorithm.from_jwk"
+  ]
+ },
+ "GHSA-xg9f-g7g7-2323": {
+  "confidence": 0.95,
+  "patch_url": "https://github.com/pallets/werkzeug/commit/517cac5a804e8c4dc4ed038bb20dacd038e7a9f1",
+  "rationale": "The vulnerability stems from the multipart decoder parsing an unlimited number of parts without bounds, consuming excess memory and CPU. The fix introduces a part counting check in `MultipartDecoder.next_event` and exposes the `max_form_parts` parameter in `FormDataParser.__init__`.",
+  "source": "gemini",
+  "symbols": [
+   "werkzeug.sansio.multipart.MultipartDecoder.next_event",
+   "werkzeug.formparser.FormDataParser.__init__"
+  ]
+ },
+ "GHSA-xgmm-8j9v-c9wx": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
+ },
+ "PYSEC-2025-183": {
+  "confidence": 0.0,
+  "patch_url": null,
+  "rationale": "No fix commit in advisory",
+  "source": "none",
+  "symbols": []
  }
 }

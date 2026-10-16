@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 
-from . import analysis, config, guard, ingest, planner
+from . import analysis, config, guard, ingest, planner, targets
 from .graph import Store
 
 EXPOSED = {"REACHABLE", "POSSIBLY_REACHABLE"}
@@ -50,8 +50,9 @@ def summarize(findings: list[dict]) -> dict:
             "verdicts": {f["vuln"]: f["verdict"] for f in findings}}
 
 
-def requirements_diff(pins_after: dict[str, str]) -> str:
-    path = ingest.DEMO_APP / "requirements.txt"
+def requirements_diff(pins_after: dict[str, str], target: targets.Target | None = None) -> str:
+    target = target or targets.get(None)
+    path = target.requirements
     old = path.read_text().splitlines(keepends=True)
     new = []
     for line in old:
@@ -59,7 +60,7 @@ def requirements_diff(pins_after: dict[str, str]) -> str:
         if m and m.group(1) in pins_after:
             line = f"{m.group(1)}=={pins_after[m.group(1)]}\n"
         new.append(line)
-    return "".join(difflib.unified_diff(old, new, "a/demo_app/requirements.txt", "b/demo_app/requirements.txt"))
+    return "".join(difflib.unified_diff(old, new, f"a/{target.repo_path}", f"b/{target.repo_path}"))
 
 
 def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: bool = False,
@@ -73,10 +74,12 @@ def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: boo
     before = summarize(baseline_findings)
     before_cov = coverage(st)
 
-    scratch = Store(f"{config.GRAPH_NAME}_scratch_{uuid.uuid4().hex[:8]}", ephemeral=True)
+    target = targets.of_store(st)
+    scratch = Store(f"{target.graph}_scratch_{uuid.uuid4().hex[:8]}", ephemeral=True)
     try:
         progress("building candidate dependency set into a scratch graph")
-        ingest.full_ingest(scratch, progress=lambda m: progress(f"  scratch: {m}"), pins=plan.pins_after)
+        ingest.full_ingest(scratch, progress=lambda m: progress(f"  scratch: {m}"), pins=plan.pins_after, target=target,
+                            parse=[r[0] for r in st.q("MATCH (p:PackageVersion {parsed:true}) RETURN p.name")])
         run = analysis.triage(scratch, label="candidate")
         after_findings = analysis.latest_findings(scratch, run)
         after = summarize(after_findings)
@@ -118,7 +121,7 @@ def verify_plan(st: Store, plan: planner.Plan, progress=print, keep_scratch: boo
         "after": after["counts"], "cleared": cleared, "new_exposed": new_exposed,
         "remaining_exposed": after["exposed"], "coverage": cov, "plan": plan.as_dict(),
         "baseline_run": base_run, "baseline_snapshot": analysis.run_snapshot(st, base_run),
-        "candidate_snapshot": candidate_snapshot, "requirements_diff": requirements_diff(plan.pins_after),
+        "candidate_snapshot": candidate_snapshot, "requirements_diff": requirements_diff(plan.pins_after, target),
         "ts": int(time.time()), "persisted": persist,
     }
     if not persist:
