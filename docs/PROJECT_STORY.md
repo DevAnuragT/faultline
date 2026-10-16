@@ -44,6 +44,36 @@ detection, the web console, recorded public mode.
 - LLM honesty. The agent once claimed a tool had failed when it had never called it. Now every tool is wrapped so a
   failure is logged and returned, and the prompt forbids describing actions without a tool call.
 
+## How I explain it (rehearsal notes)
+
+**The critical path.** Every request is a tree of spans. Walking from the root and, at each level, taking the child that
+ends last (and clamping a child that closes after its parent), gives the chain of spans the request actually waited on.
+Each span's self time on that chain is its share of end-to-end latency. Summed over a window and divided by the total,
+that is "who owns the latency". It is CRISP's algorithm, stored as `critical` and `self_us` on every span, so the
+share is one aggregation in Cypher.
+
+**Why hangs are excluded by default.** One request that waited 35 s would own every average. Steady-state numbers
+drop traces slower than ten times their endpoint's median; those traces are counted separately as hangs, which is its
+own finding: the endpoint returned 200 after 35 s because nothing timed out.
+
+**The blast radius is the hypothesis.** Reverse reachability over `CALLS` edges of the window answers "which root
+operations have a path into this service". Pausing the container, sending traffic and ingesting a new window either
+confirms that prediction or refutes it. The comparison is the verdict; the model never decides it.
+
+**The four gates.** A fix is accepted only if the endpoint's median improves by at least 20%, its tail does not get
+worse, failures do not get worse beyond one request or 5%, and the service the fix targeted actually lost at least a
+quarter of its critical-path time. A rejected fix is rolled back automatically. After a verified one, the graph names
+the next owner, which is why the demo moves from MySQL to route queueing to Redis fan-out.
+
+**Approval bound to evidence.** A proposal stores a canonical payload (what, against which window, with which
+prediction or numbers) and its SHA-256. Approval rebuilds that payload from the current graph; if a single number
+changed, the action is stale and must be re-proposed. Execution is deterministic code: pause a container, restart with
+a flag, write a policy file, open a draft PR, file an issue. The language model only reads and proposes.
+
+**Why FalkorDB is load-bearing.** Spans, windows, experiments, fixes and approvals are one graph, so the agent's
+memory and its evidence are the same thing. Betweenness and variable-length path matching give the planner its
+ranking; the window property on edges gives before/after diffs without a second store.
+
 ## What's next
 
 Real timeouts and circuit breakers as proposable changes (the guardrails table already computes them), OpenTelemetry
