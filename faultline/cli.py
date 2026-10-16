@@ -23,6 +23,7 @@ def main() -> None:
     p = sub.add_parser("actions"); p.add_argument("--status", default=None)
     p = sub.add_parser("approve"); p.add_argument("action_id")
     p = sub.add_parser("reject"); p.add_argument("action_id"); p.add_argument("--why", default="")
+    sub.add_parser("record-agent", help="record the public site's agent conversation with live Gemini")
     sub.add_parser("revert")
     sub.add_parser("reset")
     a = ap.parse_args()
@@ -54,6 +55,9 @@ def main() -> None:
         print(json.dumps(actions.approve(st, a.action_id), indent=2)); return
     if a.cmd == "reject":
         print(actions.reject(st, a.action_id, a.why)); return
+    if a.cmd == "record-agent":
+        from . import frozen
+        r = frozen.record_agent(st); print(f"recorded {len(r['turns'])} turns with {r['model']}"); return
     if a.cmd == "revert":
         experiments.revert_fixes(); return
     if a.cmd == "experiment":

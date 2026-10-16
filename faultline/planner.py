@@ -68,6 +68,8 @@ def next_fix(st: Store, window: str) -> dict | None:
     owners = analysis.critical_owners(st, window)
     top = owners[0] if owners else None
     for o in owners:
+        if o["share_pct"] < 5:
+            break
         svc = OWNER_OF.get(o["service"], o["service"])
         for flag, (target, why) in (("-M", FIX_FLAGS["-M"]), ("-D 100ms", FIX_FLAGS["-D"]), ("-W 100", FIX_FLAGS["-W"])):
             base = flag.split()[0]

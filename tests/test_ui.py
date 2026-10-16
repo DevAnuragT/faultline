@@ -39,8 +39,10 @@ def test_all_tabs_render(graph, monkeypatch):
 def test_agent_offline_answers_from_graph(graph, monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "")
     at = AppTest.from_file(str(Path(__file__).parent.parent / "streamlit_app.py"), default_timeout=60).run()
+    preloaded = len(at.session_state["chat"])  # the recorded conversation, if data/frozen/agent.json exists
+    assert preloaded % 2 == 0 and all(t[2] for t in at.session_state["chat"] if t[0] == "assistant"), "recorded turns carry their tool calls"
     at.button(key="ex0").click().run()
     assert not at.exception
     chat = at.session_state["chat"]
-    assert len(chat) == 2 and chat[1][0] == "assistant" and chat[1][2][0]["tool"] == "overview"
-    assert "mysql" in chat[1][1]
+    assert len(chat) == preloaded + 2 and chat[-1][0] == "assistant" and chat[-1][2][0]["tool"] == "overview"
+    assert "mysql" in chat[-1][1]

@@ -28,6 +28,6 @@ ROOT_SERVICE = os.environ.get("ROOT_SERVICE", "frontend")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_FALLBACK_MODELS = [m.strip() for m in os.environ.get(
-    "GEMINI_FALLBACK_MODELS", "gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-3-flash-preview").split(",") if m.strip()]
+    "GEMINI_FALLBACK_MODELS", "gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-3.5-flash-lite").split(",") if m.strip()]
 PUBLIC_MODE = os.environ.get("FAULTLINE_PUBLIC", "").lower() in ("1", "true", "yes")
 EDGE_SERVICES = [s.strip() for s in os.environ.get("EDGE_SERVICES", ROOT_SERVICE).split(",") if s.strip()]

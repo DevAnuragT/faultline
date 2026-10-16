@@ -38,6 +38,7 @@ def _fix_payload(st: Store, flags: list[str]) -> dict:
 
 
 def _store(st: Store, payload: dict, title: str, rationale: str) -> dict:
+    guard.require_writable("proposing an action")  # visitors of the public site read the recorded ledger only
     subject = payload["target"] if payload["type"] == "experiment" else " ".join(payload["flags"])
     dup = st.q("MATCH (a:Action {type:$t, subject:$s, status:'proposed'}) RETURN a.id", {"t": payload["type"], "s": subject})
     if dup:
@@ -51,16 +52,22 @@ def _store(st: Store, payload: dict, title: str, rationale: str) -> dict:
 def propose_experiment(st: Store, service: str, rationale: str = "") -> dict:
     if service not in experiments.SERVICES:
         return {"ok": False, "error": f"unknown service {service}; pausable: {sorted(experiments.SERVICES)}"}
-    p = _experiment_payload(st, service)
-    return _store(st, p, f"Pause {service} and compare with the graph's prediction", rationale or p["hypothesis"])
+    try:
+        p = _experiment_payload(st, service)
+        return _store(st, p, f"Pause {service} and compare with the graph's prediction", rationale or p["hypothesis"])
+    except guard.ReadOnlyError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def propose_fix(st: Store, flags: list[str], rationale: str = "") -> dict:
     if not flags or flags[0] not in experiments.FIX_FLAGS:
         return {"ok": False, "error": f"flags must start with one of {sorted(experiments.FIX_FLAGS)}"}
-    p = _fix_payload(st, flags)
-    return _store(st, p, f"Restart {p['service']} with {' '.join(flags)} and verify through the gates",
-                  rationale or experiments.FIX_FLAGS[flags[0]][1])
+    try:
+        p = _fix_payload(st, flags)
+        return _store(st, p, f"Restart {p['service']} with {' '.join(flags)} and verify through the gates",
+                      rationale or experiments.FIX_FLAGS[flags[0]][1])
+    except guard.ReadOnlyError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def list_actions(st: Store, status: str | None = None) -> list[dict]:

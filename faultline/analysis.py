@@ -123,6 +123,29 @@ def critical_chain(st: Store, window: str, root_op: str | None = None) -> list[d
              "duration_ms": round(r[6] / 1000, 1), "self_ms": round(r[7] / 1000, 1), "error": r[8]} for r in rows] if rows else []
 
 
+def exposure(st: Store, window: str) -> list[dict]:
+    """Security view of the same graph: every data store, the shortest call path from an edge service into it, the
+    protocol of each hop as recorded in the spans, and the amplification on the last hop. Facts only: a hop is 'http'
+    or 'grpc' as instrumented; whether it is encrypted is not in the traces, so it is reported as 'no TLS attribute'."""
+    from . import config
+    _, rows = st.ro("""
+        MATCH (edge:Service) WHERE edge.name IN $edges
+        MATCH (store:Service)<-[c:CALLS {window:$w}]-() WHERE c.proto STARTS WITH 'db:'
+        WITH DISTINCT edge, store
+        MATCH p = (edge)-[:CALLS*1..6 {window:$w}]->(store)
+        WITH edge, store, p ORDER BY length(p)
+        WITH edge, store, collect(p)[0] AS p
+        RETURN edge.name, store.name, [n IN nodes(p) | n.name], [r IN relationships(p) | r.proto], [r IN relationships(p) | r.per_trace]""",
+        {"edges": config.EDGE_SERVICES, "w": window})
+    out = []
+    for edge, store, nodes, protos, fan in rows:
+        last = protos[-1] if protos else ""
+        out.append({"edge": edge, "store": store, "path": " -> ".join(nodes), "hops": len(nodes) - 1, "protocols": protos,
+                    "store_kind": last.replace("db:", ""), "calls_per_request_into_store": round(fan[-1], 1) if fan else 0.0,
+                    "notes": [f"{nodes[i]} -> {nodes[i + 1]} over {pr or 'unknown'}: no TLS attribute recorded" for i, pr in enumerate(protos) if pr in ("http", "grpc")]})
+    return sorted(out, key=lambda r: (r["hops"], r["store"]))
+
+
 def findings(st: Store, window: str) -> list[dict]:
     out: list[dict] = []
     for o in critical_owners(st, window)[:3]:
@@ -148,6 +171,11 @@ def findings(st: Store, window: str) -> list[dict]:
             out.append({"kind": "silent_retry", "severity": "medium", "service": r["service"],
                         "detail": f"{r['service']} {r['op']}: {r['retried_errors']} failed calls were retried in {r['traces']} requests, "
                                   f"{r['wasted_ms_per_request']} ms per request spent on the failed attempt; {r['retries_on_critical_path']} retries land on the critical path"})
+    for e in exposure(st, window):
+        out.append({"kind": "exposure", "severity": "medium", "service": e["store"],
+                    "detail": f"{e['store_kind']} store {e['store']} is {e['hops']} hop(s) from the edge ({e['path']}); "
+                              f"{e['calls_per_request_into_store']} calls per request reach it"
+                              + (f"; {len(e['notes'])} hop(s) over {'/'.join(sorted({p for p in e['protocols'] if p in ('http', 'grpc')}))} with no TLS attribute recorded" if e["notes"] else "")})
     centrality = {s["service"]: s for s in single_points_of_failure(st, window)}
     _, svcs = st.ro("MATCH (s:Service) WHERE ()-[:CALLS {window:$w}]->(s) RETURN s.name", {"w": window})
     transit, leaves, roots_hit, total = [], [], set(), 0

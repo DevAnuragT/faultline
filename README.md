@@ -3,7 +3,23 @@
 **An agent that learns a system's shape from its traces, keeps it in FalkorDB, and uses the graph to decide what to
 break, what to fix, and how to prove it.**
 
-Status: day 1 (Oct 16, 2026). See [docs/ANALYSIS.md](docs/ANALYSIS.md) for the research, the graph model and the plan.
+Built Oct 16–18, 2026 for the WeMakeDevs × FalkorDB hackathon (Track 1: Agents That Act on Connected Data).
+Research, prior art and the graph model: [docs/ANALYSIS.md](docs/ANALYSIS.md) · story: [docs/PROJECT_STORY.md](docs/PROJECT_STORY.md) ·
+demo script: [docs/DEMO.md](docs/DEMO.md) · **Live site:** _coming before submission_ · **Video:** _coming before submission_
+
+## See it in 30 seconds
+
+![Findings](docs/img/findings.png)
+
+The graph says MySQL owns the latency, Redis is called 13 times per request, and nothing has redundancy. Each line is a Cypher query.
+
+![Experiments and fixes](docs/img/experiments.png)
+
+Pause `route`: the graph predicted the outage, the run confirmed it, and found that the endpoint hangs 35 s instead of failing. Apply `-M`: four gates, VERIFIED, and the graph names the next bottleneck.
+
+![Agent](docs/img/agent-tab.png)
+
+The agent chooses graph tools, shows every call, and proposes. A human approves; approval is bound to a hash of the evidence.
 
 ```
 make up          # Jaeger + HotROD (4 service containers) + FalkorDB
@@ -31,3 +47,45 @@ Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 - Pause `route`: the graph predicted `GET /dispatch` fails; it did, but it **hung for 35 s instead of failing**. Lesson recorded: the hop into `route` has no timeout.
 - Fix `-M` (customer): p50 1191 → 788 ms, VERIFIED on four gates; the graph says MySQL still owns 34%, so the next fix is `-D`.
 - Fix `-W 100` (frontend): p50 788 → 593 ms, VERIFIED; route's queueing time on the critical path gone.
+
+
+## Deploying the public site
+
+Read-only mode: `FAULTLINE_PUBLIC=true`. Proposals and approvals refuse in the backend (`faultline/guard.py`, tested in
+`tests/test_actions.py`); the experiments, fixes and the agent conversation shown are recorded runs from the graph and
+`data/frozen/agent.json`. Seed a cloud graph by running the CLI with `FALKORDB_HOST/PORT/USERNAME/PASSWORD` pointing at it
+and `GRAPH_NAME=faultline` (it can live in the same FalkorDB instance as other graphs). Streamlit Community Cloud: main
+file `streamlit_app.py`, secrets = the FalkorDB values, `GRAPH_NAME`, `FAULTLINE_PUBLIC="true"` and `GEMINI_API_KEY`.
+
+## Graph model
+
+```
+(:Service {name})-[:EXPOSES]->(:Operation {key, name, service})
+(:Service)-[:CALLS {window, count, errors, p50_ms, p95_ms, per_trace}]->(:Service)     one edge per window
+(:Operation)-[:INVOKES {window, ...}]->(:Operation)
+(:Window {id, label, traces})  (:Trace {id, root, duration_ms, status, errors})-[:IN]->(:Window)
+(:Span {service, op, peer, kind, error, critical, self_us})-[:OF]->(:Trace)  -[:CHILD_OF]->(:Span)  -[:ON]->(:Operation)
+(:Finding {kind, severity, detail})-[:ABOUT]->(:Service)
+(:Experiment {hypothesis, verdict, lesson})-[:TARGETS]->(:Service) -[:BASELINE|OBSERVED]->(:Window) -[:PREDICTED_IMPACT|ACTUAL_IMPACT]->(:Operation)
+(:Fix {flags, verdict, gates, next_owner})-[:TARGETS]->(:Service) -[:BEFORE|AFTER]->(:Window)
+(:Action {type, payload, hash, status})-[:EXECUTED_AS]->(:Experiment|:Fix)
+```
+
+Algorithms used: `algo.betweenness` (single points of failure), variable-length `CALLS` paths (blast radius), CRISP critical
+path computed per trace and stored on spans, `percentileDisc` per window (steady state), window-to-window diffs (gates, drift).
+
+## Tests
+
+`make test`: critical-path algorithm (sequential, parallel, overlapping, orphan spans), end-to-end ingest and analysis on a
+recorded HotROD trace set, approval ledger (stale and tampered evidence refused, public mode cannot propose or execute,
+REFUTED-until-reviewed planner gate), and the Streamlit app rendering every tab with the offline agent.
+
+## MCP
+
+`pip install -r requirements-mcp.txt`, then add to your client:
+
+```json
+{"mcpServers": {"faultline": {"command": "python", "args": ["-m", "faultline.mcp_server"], "cwd": "/path/to/faultline"}}}
+```
+
+Thirteen tools: everything the agent can read or propose, nothing that executes.

@@ -52,12 +52,17 @@ def test_propose_approve_is_bound_to_evidence(st, monkeypatch):
     assert actions.list_actions(st, "stale")[0]["id"] == p["action"]
 
 
-def test_public_mode_cannot_execute(st, monkeypatch):
+def test_public_mode_cannot_propose_or_execute(st, monkeypatch):
     p = actions.propose_fix(st, ["-M"])
     assert p["ok"]
     monkeypatch.setattr(config, "PUBLIC_MODE", True)
     with pytest.raises(guard.ReadOnlyError):
         actions.approve(st, p["action"])
+    r = actions.propose_experiment(st, "driver")
+    assert r["ok"] is False and "read-only" in r["error"]
+    n_before = st.q("MATCH (a:Action) RETURN count(a)")[0][0]
+    assert actions.propose_fix(st, ["-W", "100"])["ok"] is False
+    assert st.q("MATCH (a:Action) RETURN count(a)")[0][0] == n_before, "public visitors must not write to the shared graph"
     monkeypatch.setattr(config, "PUBLIC_MODE", False)
     assert actions.reject(st, p["action"], "not now")["status"] == "rejected"
 

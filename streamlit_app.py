@@ -9,7 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from pyvis.network import Network
 
-from faultline import actions, analysis, config, experiments, ingest, planner
+from faultline import actions, analysis, config, experiments, frozen, ingest, planner
 from faultline.agent import Agent
 from faultline.graph import Store
 
@@ -70,6 +70,13 @@ def render_overview(s: Store, w: str) -> None:
             st.caption(f"trace `{chain[0]['trace']}`, {chain[0]['trace_ms']} ms end to end")
             st.dataframe(pd.DataFrame([{"Service": c["service"], "Operation": c["op"], "Waits on": c["peer"], "Span ms": c["duration_ms"], "Self ms": c["self_ms"], "Error": c["error"]} for c in chain]),
                          hide_index=True, width="stretch")
+    with st.expander("Attack surface: data stores reachable from the edge (same graph, security view)"):
+        ex = analysis.exposure(s, w)
+        if ex:
+            st.dataframe(pd.DataFrame([{"Store": e["store"], "Kind": e["store_kind"], "Path from edge": e["path"], "Hops": e["hops"],
+                                        "Protocols": " / ".join(p or "?" for p in e["protocols"]), "Calls/request into store": e["calls_per_request_into_store"]} for e in ex]),
+                         hide_index=True, width="stretch")
+            st.caption("TLS is not observable in these traces: hops over http/grpc are reported as 'no TLS attribute recorded', nothing more.")
     with st.expander("Silent retries and guardrails the graph recommends"):
         r = analysis.retries(s, w)
         if r:
@@ -94,6 +101,18 @@ def render_ledger(s: Store, w: str) -> None:
             st.session_state.flash = actions.propose_fix(s, nf["flags"], f"targets {nf['targets_owner']} ({nf['share_pct']}%)")
     if st.session_state.get("flash"):
         st.info(st.session_state.pop("flash"))
+    with st.expander("Compare two windows (drift: health, owners, edges)"):
+        wins = ingest.windows(s)
+        names = {f"{x['label']} · {x['id']}": x["id"] for x in wins}
+        c1, c2 = st.columns(2)
+        wa = names[c1.selectbox("From", list(names), index=0, key="cmp_a")]
+        wb = names[c2.selectbox("To", list(names), index=len(names) - 1, key="cmp_b")]
+        d = planner.diff_windows(s, wa, wb)
+        st.dataframe(pd.DataFrame([{"Endpoint": h["op"], "p50 ms": f"{h['p50_ms'][0]:.0f} → {h['p50_ms'][1]:.0f}", "p95 ms": f"{h['p95_ms'][0]:.0f} → {h['p95_ms'][1]:.0f}",
+                                    "Failure rate": f"{h['fail_rate'][0]:.0%} → {h['fail_rate'][1]:.0%}"} for h in d["health"]]), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame([{"Owner": o["owner"], "ms/request": f"{o['per_request_ms'][0]:.0f} → {o['per_request_ms'][1]:.0f}"} for o in d["owners"]]), hide_index=True, width="stretch")
+        if d["edges_added"] or d["edges_removed"]:
+            st.warning(f"Dependency drift: added {d['edges_added']}, removed {d['edges_removed']}")
     st.markdown("**Experiments** (prediction from the graph vs what happened)")
     _, ex = s.ro("""MATCH (e:Experiment)-[:TARGETS]->(sv) OPTIONAL MATCH (e)-[a:ACTUAL_IMPACT]->(o:Operation)
                     RETURN e.id, sv.name, e.hypothesis, e.verdict, e.lesson, e.ts, collect({op:o.name, fail:a.fail_rate, p50:a.p50_ms, fast:a.failed_fast}) ORDER BY e.ts DESC""")
@@ -112,13 +131,19 @@ def render_ledger(s: Store, w: str) -> None:
 
 def render_agent(s: Store) -> None:
     st.caption("Gemini chooses the tools; every tool is a graph query or a proposal. Verdicts and numbers come from the graph.")
+    rec = st.session_state.get("recorded")
+    if rec and st.session_state.chat and st.session_state.chat[0][1] == rec["turns"][0]["prompt"]:
+        c1, c2 = st.columns([5, 1])
+        c1.info(f"Recorded conversation with `{rec['model']}` ({rec['recorded_at'][:10]}), every tool call shown. Ask your own question below.")
+        if c2.button("Clear"):
+            st.session_state.chat = []; st.rerun()
     for role, text, trace in st.session_state.chat:
         with st.chat_message(role):
             if trace:
                 with st.expander(f"Tool calls the agent chose ({len(trace)})", expanded=True):
                     for t in trace:
                         args = ", ".join(f"{k}={v!r}" for k, v in t["args"].items())
-                        st.markdown(f"`{t['tool']}({args})` → {summarise(t['result'])}")
+                        st.markdown(f"`{t['tool']}({args})` → {t['summary'] if 'summary' in t else summarise(t['result'])}")
             st.markdown(text)
     cols = st.columns(3)
     for i, q in enumerate(["What is slow and why?", "What should we fix first?", "What would you break to test resilience?"]):
@@ -128,7 +153,7 @@ def render_agent(s: Store) -> None:
     if q:
         with st.spinner("asking…"):
             reply, trace = st.session_state.agent.ask(q)
-        st.session_state.chat += [("user", q, None), ("assistant", reply, [{"tool": t["tool"], "args": t["args"], "result": t["result"]} for t in trace])]
+        st.session_state.chat += [("user", q, None), ("assistant", reply, [{"tool": t["tool"], "args": t["args"], "summary": frozen._compact(t["result"])} for t in trace])]
         st.rerun()
 
 
@@ -204,11 +229,18 @@ def main() -> None:
         st.warning("No windows yet: `make up && make baseline`."); return
     if "agent" not in st.session_state:
         st.session_state.agent = Agent(s); st.session_state.chat = []
+        st.session_state.recorded = frozen.load_agent()
+        if st.session_state.recorded:  # show the agent working before the visitor types anything
+            for t in st.session_state.recorded["turns"]:
+                st.session_state.chat += [("user", t["prompt"], None), ("assistant", t["reply"], t["trace"])]
     with st.sidebar:
         st.title("⚡ Faultline")
         st.caption("The graph decides what to break and what to fix. A human approves. The system is changed and re-measured.")
         labels = {f"{x['label']} · {x['id']} · {x['traces']} traces": x["id"] for x in reversed(wins)}
-        w = labels[st.selectbox("Window", list(labels))]
+        steady = ingest.latest_window(s)
+        w = labels[st.selectbox("Window", list(labels), index=[*labels.values()].index(steady))]
+        if w != steady and any(x["id"] == w and x["label"].startswith("pause-") for x in wins):
+            st.warning("This window was recorded while a service was deliberately paused: numbers describe the experiment, not steady state.")
         if PUBLIC:
             st.info("Read-only public demo: experiments and fixes are recorded runs; approvals are disabled.")
         st.markdown(f"Model: `{st.session_state.agent.model or 'offline (no key)'}` · graph `{s.name}`")

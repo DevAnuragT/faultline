@@ -17,11 +17,17 @@ Rules:
   observed window; a fix is VERIFIED/REJECTED by its gates. Never upgrade a REJECTED or REFUTED result in prose.
 - When asked what is wrong / what is slow / what is risky: call overview, then explain_critical_path for the main
   endpoint, and cite the owners by share and ms per request.
-- When asked what to fix or improve: call overview, then next_fix and rank_experiments. Propose with propose_fix or
-  propose_experiment. Nothing runs until a human approves it in the Actions tab: say "proposed" (never "applied",
-  "ran" or "started") and give the action id. After a fix is VERIFIED, say what the graph names as the next owner.
+- When asked what to fix or improve: call overview, then next_fix and rank_experiments. Then you MUST call
+  propose_fix (with the flags next_fix returned) or propose_experiment (with the top-ranked target) before answering:
+  a recommendation without a proposal is incomplete. Nothing runs until a human approves it in the Actions tab: say
+  "proposed" (never "applied", "ran" or "started") and give the action id the tool returned. After a fix is VERIFIED,
+  say what the graph names as the next owner.
 - When asked about resilience, timeouts, retries or chaos: use rank_experiments, guardrails, retries and history.
+- When asked about security, exposure, attack surface or data stores: call attack_surface and report paths and hops;
+  never claim a hop is encrypted or unencrypted, only that no TLS attribute was recorded.
 - history is your memory across sessions: check it before proposing something that was already tried.
+- If a tool returns {"error": ...}, quote that error. Never claim a tool failed or was unavailable unless its result
+  says so, and never describe an action you did not call a tool for.
 - Be concise: short paragraphs or bullets, no filler, no praise."""
 
 FORBIDDEN = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|CALL\s+db\.|LOAD\s+CSV)\b", re.I)
@@ -97,6 +103,14 @@ class Toolbox:
         self._log("retries", {"window": w}, res)
         return res
 
+    def attack_surface(self, window: str = "") -> list[dict]:
+        """Security view: each data store, the shortest call path from an edge service into it, protocol per hop as
+        recorded in the spans (TLS is not observable in traces and is reported as such), and calls per request into the store."""
+        w = self._w(window or None)
+        res = analysis.exposure(self.st, w)
+        self._log("attack_surface", {"window": w}, res)
+        return res
+
     def history(self) -> dict:
         """Memory: every experiment (hypothesis, verdict, lesson) and fix (flags, verdict, gates, next owner) recorded in
         the graph, newest first, plus pending/done actions."""
@@ -143,8 +157,25 @@ class Toolbox:
         return res
 
     def tools(self) -> list:
+        return [self._safe(f) for f in self._raw_tools()]
+
+    def _safe(self, fn):
+        """Keep the name, signature and docstring (Gemini builds the schema from them); log and return any failure."""
+        import functools
+
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:
+                res = {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
+                self._log(fn.__name__, kwargs or {"args": [str(a) for a in args]}, res)
+                return res
+        return wrapped
+
+    def _raw_tools(self) -> list:
         return [self.overview, self.explain_critical_path, self.blast_radius, self.rank_experiments, self.next_fix, self.guardrails,
-                self.retries, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.query_graph]
+                self.retries, self.attack_surface, self.history, self.compare_windows, self.propose_experiment, self.propose_fix, self.query_graph]
 
 
 class Agent:
@@ -180,7 +211,8 @@ class Agent:
                     if llm.is_quota_error(exc):
                         llm.mark_exhausted(self.model)
                         nxt = llm.models()[0]
-                    elif llm.is_transient(exc):  # 503 "high demand": move along the chain without giving the model up
+                    elif llm.is_transient(exc):  # 503 "high demand": wait a moment, move along the chain, keep the model
+                        time.sleep(2)
                         chain = llm.models()
                         nxt = chain[(chain.index(self.model) + 1) % len(chain)] if self.model in chain else chain[0]
                     else:
