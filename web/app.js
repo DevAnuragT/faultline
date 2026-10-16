@@ -307,13 +307,14 @@ document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-
 
 /* ---------- experiments ---------- */
 const VERDICT = {
-  CONFIRMED: ["ok", "The outcome matched what the graph predicted."],
+  CONFIRMED: ["ok", "Every checkable part of the graph's hypothesis held."],
   VERIFIED: ["ok", "All four gates passed; the fix was kept."],
-  REFUTED: ["bad", "The outcome contradicted the graph's prediction."],
+  REFUTED: ["bad", "At least one part of the graph's hypothesis did not hold."],
   REJECTED: ["bad", "A gate failed; the fix was rolled back."],
 };
 const verdict = (v) => { const [k, t] = VERDICT[v] || [["CONFIRMED", "VERIFIED"].includes(v) ? "ok" : "bad", ""]; return `<span class="pill ${k}" title="${esc(t)}"><i></i>${esc(v)}</span>`; };
 const gateItem = (passed, name, detail) => `<li class="${passed ? "" : "fail"}">${icon(passed ? "check" : "cross")}<span class="g-name">${nice(name)}</span>${detail ? `<span class="g-detail">${nice(detail)}</span>` : ""}</li>`;
+const splitPart = (text) => { const i = text.indexOf(": "); return i > 0 ? [text.slice(0, i), text.slice(i + 2)] : [text, ""]; };
 const splitGate = (text) => { const i = text.lastIndexOf(": "); return i > 0 ? [text.slice(0, i), text.slice(i + 2)] : [text, ""]; };
 const winSpan = (a, b) => `<span class="span" title="before → after window">${esc(a)} → ${esc(b)}</span>`;
 const countMeta = (id, n, noun) => { $(id).innerHTML = n ? `<b>${n}</b> ${noun}${n === 1 ? "" : "s"}` : ""; };
@@ -332,16 +333,12 @@ async function loadExperiments() {
   state.planner = p; state.ledger = l;
   $$("[data-propose-exp]").forEach((b) => b.addEventListener("click", async () => { const r = await post("/api/propose", { type: "experiment", target: b.dataset.proposeExp }); proposed(r, `Proposed ${r.action}. Approve it under Approvals.`); pollActions(); }));
   const nf = p.next_fix;
-  $("#next-fix").innerHTML = nf && nf.flags ? `<div class="flag">${esc(nf.flags.join(" "))}<span class="on">on ${esc(nf.service)}</span></div><p>${esc(nf.why)}</p>
-      <dl class="kv"><dt>Targets</dt><dd>${esc(nf.targets_owner)} · ${nf.share_pct}% · ${fmt(nf.per_request_ms)} ms per request</dd>
-      ${nf.note ? `<dt>Note</dt><dd>${esc(nf.note)}</dd>` : ""}${nf.previous_attempt ? `<dt>Last attempt</dt><dd>${verdict(nf.previous_attempt.verdict)} ${nf.previous_attempt.failed_gates.length ? `on ${esc(nf.previous_attempt.failed_gates.join("; "))}` : ""}</dd>` : ""}</dl>
-      <div><button class="btn primary small" id="propose-fix" ${lock()}>Propose this fix</button></div>`
-    : empty("No known knob for the top owner", `${esc(nf?.note || "No configuration knob targets the current top latency owner.")} Ask the Agent for options, or add a guardrail from Findings.`);
+  $("#next-fix").innerHTML = remedyPanel(p, l);
   $("#propose-fix")?.addEventListener("click", async () => { const r = await post("/api/propose", { type: "fix", flags: nf.flags.join(" "), rationale: `targets ${nf.targets_owner} (${nf.share_pct}%)` }); proposed(r, `Proposed ${r.action}. Approve it under Approvals.`); pollActions(); });
 
   countMeta("#n-experiments", l.experiments.length, "experiment");
   $("#experiments-list").innerHTML = l.experiments.map((e) => `<article class="card"><div class="card-head">${verdict(e.verdict)}<h5 class="card-title">pause <span class="mono">${esc(e.target)}</span></h5>${winSpan(e.baseline, e.observed)}${ago(e.ts)}</div>
-    <dl class="kv"><dt>Hypothesis</dt><dd>${esc(e.hypothesis)}</dd><dt>Observed</dt><dd>${e.impact.map((x) => `${esc(x.op)}: ${pct(x.fail_rate)} failed, p50 ${fmt(x.p50_ms)} ms, ${x.failed_fast ? "failed fast" : "<b>hung</b>"}`).join("; ") || "—"}</dd></dl>
+    <dl class="kv"><dt>Hypothesis</dt><dd>${esc(e.hypothesis)}${e.parts?.length ? `<ul class="gates parts" aria-label="Parts of the hypothesis">${e.parts.map((g) => gateItem(g.passed, ...splitPart(g.text))).join("")}</ul>` : ""}</dd><dt>Observed</dt><dd>${e.impact.map((x) => `${esc(x.op)}: ${pct(x.fail_rate)} failed, p50 ${fmt(x.p50_ms)} ms, ${x.failed_fast ? "failed fast" : "<b>hung</b>"}`).join("; ") || "—"}</dd></dl>
     <div class="lesson"><b>Lesson</b>${nice(e.lesson)}</div></article>`).join("") || empty("No experiment yet", "Propose a pause from What to break next, then approve it under Approvals.", "flask");
   $("#n-fixes").innerHTML = l.fixes.length ? `<b>${l.fixes.length}</b> ${l.fixes.length === 1 ? "fix" : "fixes"}` : "";
   $("#fixes").innerHTML = l.fixes.map((f) => `<article class="card"><div class="card-head">${verdict(f.verdict)}<h5 class="card-title"><span class="mono">${esc(f.flags)}</span> <span class="muted">on ${esc(f.service)}</span></h5>${winSpan(f.before, f.after)}${ago(f.ts)}</div>
@@ -574,6 +571,11 @@ const HELP = {
   "owners-method": "Each operation is credited only with the time the request spent waiting on it (CRISP, bottom-up); hung requests are left out.",
   "guardrails": "Timeouts are set at three times the hop's p95; a guardrail is high priority when an experiment showed that hop hangs.",
   "planner": "Priority is criticality times safety, lowered for targets tested recently; the experiment ledger is the planner's memory.",
+  "remedy-contention": "Contention: requests wait their turn for the same lock, connection or worker, so the wait grows with load.",
+  "remedy-serialized_fanout": "Serialized fan-out: one request makes many calls but only a few run at once, so they queue behind each other.",
+  "remedy-per_call_cost": "Per-call cost: a single call is slow on its own; the remedy is to make each call cheaper, not to make fewer of them.",
+  "remedy-hang": "Hang: a call waits far past its normal time because nothing times it out.",
+  "remedy-retry_storm": "Retry storm: failed calls are retried so often that the retries themselves add load and latency.",
 };
 const TOUR = [
   { view: "findings", target: [".window-field", "#strip"], atTop: true,
@@ -864,13 +866,19 @@ async function loadNextSteps() {
     body: { type: "issue", window: w }, verb: "Propose incident issue",
     extra: i.worst_trace ? `<a class="linkish" href="#trace?w=${encodeURIComponent(w)}&t=${encodeURIComponent(i.worst_trace.id)}">Open the worst request</a>` : "" });
   const nf = p.next_fix;
-  if (nf?.flags) steps.push({ type: "fix", subject: nf.flags.join(" "), tone: "wait", title: `Fix ${nf.targets_owner}: ${nf.flags.join(" ")} on ${nf.service}`,
-    why: `${nf.why} It owns ${nf.share_pct}% of critical-path time (${fmt(nf.per_request_ms)} ms per request).`, body: { type: "fix", flags: nf.flags.join(" "), rationale: `targets ${nf.targets_owner} (${nf.share_pct}%)` }, verb: "Propose fix" });
+  if (nf?.flags) steps.push({ type: "fix", subject: nf.flags.join(" "), tone: "wait", title: `Fix ${nf.targets_owner} with ${nf.flags.join(" ")} on ${nf.service}`,
+    why: nf.evidence ? `${sentence(nf.evidence)}. ${cap(nf.change)}.` : `${nf.why} It owns ${nf.share_pct}% of critical-path time (${fmt(nf.per_request_ms)} ms per request).`,
+    body: { type: "fix", flags: nf.flags.join(" "), rationale: `targets ${nf.targets_owner} (${nf.share_pct}%)` }, verb: "Propose fix" });
+  const top = (p.remedies || [])[0];
+  if (top && !top.actuator && !(nf && nf.targets_owner === `${top.service} ${top.op}`))
+    steps.push({ type: "remedy", tone: "muted", title: `${REMEDY[top.kind] ? cap(REMEDY[top.kind]) : "Remedy"} in ${/->/.test(top.op) ? top.op : `${top.service} ${top.op}`}`,
+      why: `${sentence(top.evidence)}. ${cap(top.change)}. There is no actuator for it in this environment, so it is a code change.`, verb: "" });
   const g = state.overview.guardrails.find((x) => x.priority === "high" && x.kind === "timeout");
   if (g) steps.push({ type: "guardrail", subject: g.hop, tone: "wait", title: `Add a ${g.value} timeout on ${g.hop}`, why: g.evidence, body: { type: "guardrail", hop: g.hop }, verb: "Propose guardrail" });
   const x = p.experiments.find((r) => !r.skip && r.target !== "frontend" && !r.history && r.priority > 0);
   if (x) steps.push({ type: "experiment", subject: x.target, tone: "muted", title: `Test what happens when ${x.target} stops`,
     why: `Nothing has tested it yet. ${x.reasons.join(", ")}.`, body: { type: "experiment", target: x.target }, verb: "Propose pause" });
+  steps.splice(4);
   if (!steps.length && state.overview.owners[0]) {
     const o = state.overview.owners[0];
     steps.push({ type: "ask", tone: "muted", title: `Ask the agent how to speed up ${label(o)}`, why: `It owns ${o.share_pct}% of critical-path time and no known knob targets it.`, verb: "" });
@@ -881,8 +889,9 @@ async function loadNextSteps() {
     const pend = st.subject && pending(st);
     const act = pend ? `<span class="pill wait"><i></i>awaiting approval</span><a class="btn small" href="#approvals">Review in Approvals</a>`
       : st.type === "ask" ? `<a class="btn small" href="#agent">Open the agent</a>`
+      : st.type === "remedy" ? `<a class="btn small" href="#experiments">See all remedies</a>`
       : `<button class="btn small${st.type === "issue" ? " primary" : ""}" type="button" data-next="${esc(JSON.stringify(st.body))}" ${lock()}>${esc(st.verb)}</button>`;
-    return `<li class="step tone-${st.tone}"><span class="step-kind">${esc({ issue: "incident", fix: "fix", guardrail: "guardrail", experiment: "experiment", ask: "question" }[st.type])}</span>
+    return `<li class="step tone-${st.tone}"><span class="step-kind">${esc({ issue: "incident", fix: "fix", guardrail: "guardrail", experiment: "experiment", ask: "question", remedy: "remedy" }[st.type])}</span>
       <div class="step-main"><b>${nice(st.title)}</b><p>${nice(st.why)}</p>${st.extra ? `<p class="step-extra">${st.extra}</p>` : ""}</div><div class="step-act">${act}</div></li>`;
   }).join("") || `<li class="empty-li">${empty("Nothing to do", "The graph has no action to propose for this window.", "check")}</li>`;
 }
@@ -1028,7 +1037,7 @@ function mdLedger() {
     + (i.hop ? ` Where to look: ${plain(i.hop)}.` : "") + (i.worst_trace ? ` Worst request ${i.worst_trace.id} (${fmt(i.worst_trace.duration_ms)} ms).` : "")));
   L.push("", "## Experiments", "");
   if (!l.experiments.length) L.push("None yet.");
-  l.experiments.forEach((e) => L.push(`### ${e.verdict}: pause ${e.target} (${when(e.ts)})`, "", `- Hypothesis: ${e.hypothesis}`,
+  l.experiments.forEach((e) => L.push(`### ${e.verdict}: pause ${e.target} (${when(e.ts)})`, "", `- Hypothesis: ${e.hypothesis}`, ...(e.parts || []).map((g) => `  - [${g.passed ? "x" : " "}] ${plain(g.text)}`),
     `- Observed: ${e.impact.map((x) => `${x.op}: ${pct(x.fail_rate)} failed, p50 ${fmt(x.p50_ms)} ms, ${x.failed_fast ? "failed fast" : "hung"}`).join("; ") || "nothing recorded"}`, `- Lesson: ${plain(e.lesson)}`, `- Windows: ${e.baseline} → ${e.observed}`, ""));
   L.push("## Fixes", "");
   if (!l.fixes.length) L.push("None yet.");
@@ -1042,6 +1051,47 @@ async function exportMd(build, what) {
 }
 $("#export-report").addEventListener("click", () => exportMd(mdReport, "window report"));
 $("#export-ledger").addEventListener("click", () => exportMd(mdLedger, "ledger"));
+
+/* ---------- remedies: the graph names the change from evidence; the environment may or may not supply a knob ---------- */
+const remedyName = (r) => /->/.test(r.op) ? nice(r.op) : `${esc(r.service)} ${esc(r.op)}`;
+const REMEDY = { contention: "contention", serialized_fanout: "serialized fan-out", per_call_cost: "per-call cost", hang: "hang", retry_storm: "retry storm" };
+const cap = (x) => { const t = String(x ?? "").trim().replace(/\.$/, ""); return t ? t[0].toUpperCase() + t.slice(1) : ""; };
+/* evidence sentences start with a service name, which keeps its case */
+const sentence = (x) => String(x ?? "").trim().replace(/\.$/, "");
+function remedyPanel(p, l) {
+  const rs = p.remedies || [], nf = p.next_fix;
+  if (!rs.length && !nf) return empty("Nothing to fix", "The graph found no remedy with measured evidence in this window.", "check");
+  const verified = new Set((l.fixes || []).filter((f) => f.verdict === "VERIFIED").map((f) => f.flags.split(" ")[0]));
+  const pendingFix = (flags) => (state.actions || []).find((a) => a.status === "proposed" && a.type === "fix" && a.subject === flags);
+  const main = nf ? { kind: nf.kind, owner: nf.targets_owner, name: nice(nf.targets_owner), share: nf.share_pct, ms: nf.per_request_ms, evidence: nf.evidence || nf.why, change: nf.change, actuator: { flags: nf.flags, service: nf.service, what: nf.why }, note: nf.note, previous: nf.previous_attempt, next: true }
+    : { kind: rs[0].kind, owner: `${rs[0].service} ${rs[0].op}`, name: remedyName(rs[0]), share: rs[0].share_pct, ms: rs[0].per_request_ms, evidence: rs[0].evidence, change: rs[0].change, actuator: rs[0].actuator };
+  const rest = rs.filter((r) => `${r.service} ${r.op}` !== main.owner);
+  const tag = (kind) => `<span class="tag remedy-kind" tabindex="0" data-help="remedy-${esc(kind)}">${esc(REMEDY[kind] || kind || "remedy")}</span>`;
+  const actState = (a, isMain, why) => {
+    if (!a) return `<span class="no-act"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg>No actuator in this environment</span>`;
+    const flags = a.flags.join(" ");
+    if (verified.has(a.flags[0]) && !(isMain && main.next)) return `<span class="pill ok" title="A fix with this knob already passed every gate"><i></i>applied, verified</span>`;
+    if (pendingFix(flags)) return `<span class="pill wait"><i></i>awaiting approval</span>`;
+    return isMain && main.next ? `<button class="btn primary small" id="propose-fix" ${lock()}>Propose this fix</button>`
+      : `<button class="btn small" type="button" data-next="${esc(JSON.stringify({ type: "fix", flags, rationale: why }))}" ${lock()}>Propose fix</button>`;
+  };
+  const a = main.actuator;
+  let html = `<div class="remedy-main">
+    <div class="remedy-head">${tag(main.kind)}<span class="remedy-owner"><b>${main.name}</b> · ${main.share}% · ${fmt(main.ms)} ms per request</span></div>
+    <p class="remedy-evidence">${nice(sentence(main.evidence))}.</p>
+    <dl class="remedy-kv">
+      ${main.change ? `<dt>Change</dt><dd>${nice(cap(main.change))}.</dd>` : ""}
+      <dt>Actuator</dt><dd>${a ? `<div class="act-what"><span class="act-line"><code>${esc(a.flags.join(" "))}</code> on ${esc(a.service)}</span><span class="hint">${esc(cap(a.what || ""))}</span></div><div class="act-do">${actState(a, true, `targets ${main.owner} (${main.share}%)`)}</div>`
+        : `<div class="act-what">${actState(null)}<span class="hint">The graph names the change; making it here is a code change.</span></div>`}</dd>
+    </dl>
+    ${main.note ? `<p class="hint">${nice(cap(main.note))}.</p>` : ""}${main.previous ? `<p class="hint">Last attempt: ${verdict(main.previous.verdict)} ${main.previous.failed_gates.length ? `on ${esc(main.previous.failed_gates.join("; "))}` : ""}</p>` : ""}
+  </div>`;
+  if (rest.length) html += `<div class="remedy-rest"><h5>Other remedies, by latency at stake</h5><ul class="remedies">${rest.map((r) => `<li>
+      <div class="r-top">${tag(r.kind)}<b>${remedyName(r)}</b><span class="hint">${r.share_pct}% · ${fmt(r.per_request_ms)} ms</span></div>
+      <p>${nice(sentence(r.evidence))}. ${nice(cap(r.change))}.</p>
+      <div class="r-act">${r.actuator ? `<code>${esc(r.actuator.flags.join(" "))}</code> on ${esc(r.actuator.service)}` : ""}${actState(r.actuator, false, `targets ${r.service} ${r.op} (${r.share_pct}%)`)}</div></li>`).join("")}</ul></div>`;
+  return html;
+}
 
 boot().catch((e) => {
   document.body.classList.remove("loading");

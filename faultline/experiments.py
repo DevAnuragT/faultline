@@ -74,15 +74,17 @@ def hypothesis(st: Store, window: str, service: str) -> dict:
     t0 = order.get(service, 0.0)
     from . import config
     keep = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t < t0 and calls.get(s, {}).get("calls_per_trace", 0) > 0)
+    frozen = sorted(s for s, owner in OWNER_OF.items() if owner == service and calls.get(s, {}).get("calls_per_trace", 0) > 0)
     starved = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t >= t0 and s not in br["dependent_services"]
-                     and calls.get(s, {}).get("calls_per_trace", 0) > 0)
+                     and s not in frozen and calls.get(s, {}).get("calls_per_trace", 0) > 0)
     text = (f"If {service} stops, {', '.join(p['op'] for p in predicted) or 'nothing recorded'} fail(s) "
             f"({', '.join(br['dependent_services'])} depend on it); "
             + (f"{', '.join(keep)} keep answering (called before {service}); " if keep else "")
             + (f"{', '.join(starved)} get almost no calls (only called after {service}); " if starved else "")
+            + (f"{', '.join(frozen)} freeze with it (in-process) and drain their backlog when it resumes unless callers cancel; " if frozen else "")
             + (f"{', '.join(unaffected)} unaffected." if unaffected else "no other root operation."))
     return {"target": service, "text": text, "predicted": predicted, "unaffected": unaffected, "dependent_services": br["dependent_services"],
-            "keep_answering": keep, "starved": starved, "baseline_calls": {s: calls.get(s, {}) for s in keep + starved}}
+            "keep_answering": keep, "starved": starved, "frozen_with": frozen, "baseline_calls": {s: calls.get(s, {}) for s in keep + starved + frozen}}
 
 
 def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, parallel: int = 3, progress=print) -> dict:
@@ -99,6 +101,7 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
         observed_load = load.run(requests_n, parallel, progress=progress)
     finally:
         _compose("unpause", service)
+        unpaused_us = int(time.time() * 1_000_000)
         progress(f"unpaused {service}")
     time.sleep(4)  # let the SDK flush spans to Jaeger
     w = ingest.ingest_window(st, f"pause-{service}", start_us=start_us, progress=progress)["window"]
@@ -124,16 +127,23 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
         b, a = hyp["baseline_calls"].get(svc, {}), after_calls.get(svc, {"calls_per_trace": 0.0, "error_rate": 0.0})
         ok = a["calls_per_trace"] <= 0.2 * max(b.get("calls_per_trace", 0), 0.01)
         parts.append({"part": f"{svc} is starved", "ok": ok, "detail": f"{a['calls_per_trace']:.1f} calls/request (baseline {b.get('calls_per_trace', 0):.1f})"})
+    backlog = []
+    for svc in hyp.get("frozen_with", []) + hyp["starved"]:
+        _, late = st.ro("MATCH (s:Span {window:$w, service:$s}) WHERE s.start_us > $t RETURN count(s)", {"w": w, "s": svc, "t": unpaused_us})
+        if late and late[0][0]:
+            backlog.append(f"{late[0][0]} calls into {svc} ran after {service} resumed")
     confirmed = all(p["ok"] for p in parts)
     verdict = "CONFIRMED" if confirmed else "REFUTED"
     hung = [r for r in rows if r["confirmed"] and not r["failed_fast"]]
     lesson = (f"{', '.join(r['op'] for r in hung)} did not fail fast: p50 {hung[0]['observed_p50_ms']:.0f} ms vs baseline "
               f"{hung[0]['baseline_p50_ms']:.0f} ms; a timeout or circuit breaker on the hop into {service} would turn a hang into an error"
               if hung else "affected operations failed fast")
+    if backlog:
+        lesson += ". Backlog: " + "; ".join(backlog) + ": callers kept waiting instead of cancelling, so no load was shed and the work ran late"
     if not confirmed:
         lesson = "prediction refuted: " + "; ".join(f"{p['part']} ({p['detail']})" for p in parts if not p["ok"]) + ". " + lesson
     result = {"id": exp_id, "kind": "pause", "target": service, "hypothesis": hyp["text"], "baseline": baseline, "observed": w,
-              "verdict": verdict, "rows": rows, "parts": parts, "unexpected_failures": unexpected, "lesson": lesson, "load": observed_load}
+              "verdict": verdict, "rows": rows, "parts": parts, "backlog": backlog, "unexpected_failures": unexpected, "lesson": lesson, "load": observed_load}
     st.q("""MATCH (b:Window {id:$b}), (o:Window {id:$o}), (s:Service {name:$svc})
             CREATE (e:Experiment {id:$id, kind:'pause', target:$svc, hypothesis:$h, verdict:$v, lesson:$lesson, parts:$parts, ts:$ts})
             CREATE (e)-[:TARGETS]->(s) CREATE (e)-[:BASELINE]->(b) CREATE (e)-[:OBSERVED]->(o)

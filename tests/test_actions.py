@@ -143,6 +143,7 @@ def test_remedies_come_from_evidence_and_hypotheses_can_be_refuted(st):
     assert nf and nf["flags"] in (["-D", "100ms"], ["-W", "100"]) and nf["evidence"] and nf["kind"] in ("per_call_cost", "serialized_fanout")
     h = experiments.hypothesis(st, w, "customer")
     assert "driver" in h["starved"] and "route" in h["starved"] and h["keep_answering"] == []
+    assert h["frozen_with"] == ["mysql"] and "mysql" not in h["starved"] and "freeze with it" in h["text"]
     h2 = experiments.hypothesis(st, w, "route")
     assert set(h2["keep_answering"]) >= {"customer", "driver"} and h2["starved"] == []
     assert "keep answering" in h2["text"] and "almost no calls" in h["text"]
