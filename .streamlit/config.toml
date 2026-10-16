@@ -1,6 +1,0 @@
-[theme]
-base = "dark"
-primaryColor = "#f0883e"
-
-[server]
-headless = true

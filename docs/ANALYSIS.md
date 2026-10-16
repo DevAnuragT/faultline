@@ -169,5 +169,5 @@ one-request tolerance and the automatic rollback. After each fix the graph names
    CRISP critical path, findings (critical owners, SPOF by betweenness, fan-out, hang-not-fail), blast-radius prediction, CLI, tests.
 2. **Loop (Oct 17):** experiment runner (`pause`, `fix` via compose override), gates, verdicts; Gemini tool-calling
    agent with human approval for anything that touches the system; read-only public mode.
-3. **Ship (Oct 18 morning):** Streamlit UI with the service graph, critical-path flame table, experiment ledger;
+3. **Ship (Oct 18 morning):** the web console with the service graph, trace waterfall, experiment ledger;
    deploy; video; README; submit by noon, well ahead of 23:59 IST.

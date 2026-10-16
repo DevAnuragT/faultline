@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: faultline
+    runtime: docker
+    plan: free
+    envVars:
+      - { key: FAULTLINE_PUBLIC, value: "true" }
+      - { key: GRAPH_NAME, value: "faultline" }
+      - { key: FALKORDB_SSL, value: "false" }
+      - { key: GEMINI_MODEL, value: "gemini-3.5-flash" }
+      - { key: FALKORDB_HOST, sync: false }
+      - { key: FALKORDB_PORT, sync: false }
+      - { key: FALKORDB_USERNAME, sync: false }
+      - { key: FALKORDB_PASSWORD, sync: false }
+      - { key: GEMINI_API_KEY, sync: false }

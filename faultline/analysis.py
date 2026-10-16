@@ -146,6 +146,30 @@ def exposure(st: Store, window: str) -> list[dict]:
     return sorted(out, key=lambda r: (r["hops"], r["store"]))
 
 
+def trace_waterfall(st: Store, trace_id: str) -> dict:
+    """Every span of one trace with depth and offset: the waterfall view, critical spans marked."""
+    _, rows = st.ro("""MATCH (s:Span)-[:OF]->(t:Trace {id:$id})
+                       RETURN t.duration_ms, t.root, s.id, s.parent, s.service, s.op, s.peer, s.start_us, s.duration_us, s.critical, s.self_us, s.error, s.kind
+                       ORDER BY s.start_us""", {"id": trace_id})
+    if not rows:
+        return {"trace": trace_id, "spans": []}
+    t0 = min(r[7] for r in rows)
+    depth: dict[str, int] = {}
+    by_id = {r[2]: r for r in rows}
+
+    def d(sid: str) -> int:
+        if sid in depth:
+            return depth[sid]
+        parent = by_id[sid][3]
+        depth[sid] = 0 if parent not in by_id else d(parent) + 1
+        return depth[sid]
+
+    spans = [{"id": r[2], "parent": r[3], "service": r[4], "op": r[5], "peer": r[6] or "", "offset_ms": round((r[7] - t0) / 1000, 2),
+              "duration_ms": round(r[8] / 1000, 2), "critical": bool(r[9]), "self_ms": round((r[10] or 0) / 1000, 2), "error": bool(r[11]),
+              "kind": r[12], "depth": d(r[2])} for r in rows]
+    return {"trace": trace_id, "root": rows[0][1], "duration_ms": round(rows[0][0], 2), "spans": spans}
+
+
 def findings(st: Store, window: str) -> list[dict]:
     out: list[dict] = []
     for o in critical_owners(st, window)[:3]:

@@ -9,17 +9,21 @@ demo script: [docs/DEMO.md](docs/DEMO.md) · **Live site:** _coming before submi
 
 ## See it in 30 seconds
 
-![Findings](docs/img/findings.png)
+![Findings](docs/img/site-findings.png)
 
-The graph says MySQL owns the latency, Redis is called 13 times per request, and nothing has redundancy. Each line is a Cypher query.
+The graph says who owns the latency, which hops fan out, what hangs instead of failing, and that nothing has redundancy. Each line is a Cypher query.
 
-![Experiments and fixes](docs/img/experiments.png)
+![Trace waterfall](docs/img/site-trace.png)
 
-Pause `route`: the graph predicted the outage, the run confirmed it, and found that the endpoint hangs 35 s instead of failing. Apply `-M`: four gates, VERIFIED, and the graph names the next bottleneck.
+The slowest steady-state request as a waterfall: the spans it actually waited on in ember, the rest in slate, errors in pink.
 
-![Agent](docs/img/agent-tab.png)
+![Experiments and fixes](docs/img/site-experiments.png)
 
-The agent chooses graph tools, shows every call, and proposes. A human approves; approval is bound to a hash of the evidence.
+Pause `route`: the graph predicted the outage, the run confirmed it, and found that the endpoint hangs 35 s instead of failing. Apply a fix: four gates, VERIFIED or REJECTED (and rolled back), and the graph names the next bottleneck.
+
+![Agent](docs/img/site-agent.png)
+
+The agent chooses graph tools, shows every call, and proposes. A person approves; approval is bound to a hash of the evidence.
 
 ```
 make up          # Jaeger + HotROD (4 service containers) + FalkorDB
@@ -27,7 +31,7 @@ make baseline    # 40 parallel /dispatch requests -> a Window in FalkorDB with c
 make report      # critical-path owners, single points of failure, fan-out, hangs
 make experiment  # pause `route`: the graph predicts the blast radius, the run confirms or refutes it
 make fix         # apply HotROD's -M fix to `customer`; four gates decide VERIFIED / REJECTED; the graph names the next owner
-make run         # Streamlit UI: findings, experiment planner, agent, human approval, Cypher
+make run         # the site on http://localhost:8600: findings, experiments, agent, approvals, Cypher
 
 .venv/bin/python -m faultline.cli agent "What should we fix first?"   # Gemini proposes; nothing runs
 .venv/bin/python -m faultline.cli actions                              # the proposal, with its evidence hash
@@ -52,10 +56,10 @@ Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 ## Deploying the public site
 
 Read-only mode: `FAULTLINE_PUBLIC=true`. Proposals and approvals refuse in the backend (`faultline/guard.py`, tested in
-`tests/test_actions.py`); the experiments, fixes and the agent conversation shown are recorded runs from the graph and
-`data/frozen/agent.json`. Seed a cloud graph by running the CLI with `FALKORDB_HOST/PORT/USERNAME/PASSWORD` pointing at it
-and `GRAPH_NAME=faultline` (it can live in the same FalkorDB instance as other graphs). Streamlit Community Cloud: main
-file `streamlit_app.py`, secrets = the FalkorDB values, `GRAPH_NAME`, `FAULTLINE_PUBLIC="true"` and `GEMINI_API_KEY`.
+`tests/test_actions.py` and `tests/test_api.py`); the experiments, fixes and the agent conversation shown are recorded runs
+from the graph and `data/frozen/agent.json`. Seed a cloud graph by running the CLI with `FALKORDB_HOST/PORT/USERNAME/PASSWORD`
+pointing at it and `GRAPH_NAME=faultline` (it can share a FalkorDB instance with other graphs). The site is a FastAPI app:
+`render.yaml` deploys it on Render's free plan from the Dockerfile; any host that runs a container works the same way.
 
 ## Graph model
 
@@ -78,7 +82,7 @@ path computed per trace and stored on spans, `percentileDisc` per window (steady
 
 `make test`: critical-path algorithm (sequential, parallel, overlapping, orphan spans), end-to-end ingest and analysis on a
 recorded HotROD trace set, approval ledger (stale and tampered evidence refused, public mode cannot propose or execute,
-REFUTED-until-reviewed planner gate), and the Streamlit app rendering every tab with the offline agent.
+REFUTED-until-reviewed planner gate), and the HTTP API: overview, critical chain and waterfall, planner, offline agent, proposals, public-mode refusals, read-only Cypher.
 
 ## MCP
 

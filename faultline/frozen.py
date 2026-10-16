@@ -10,7 +10,7 @@ from .graph import Store
 FROZEN = config.ROOT / "data" / "frozen"
 AGENT_FILE = FROZEN / "agent.json"
 AGENT_PROMPTS = [("What is slow and why?", {"overview", "explain_critical_path"}),
-                 ("What should we fix first? Propose it.", {"propose_fix", "propose_experiment"}),
+                 ("What should we fix first? Use propose_fix to propose it.", {"propose_fix", "propose_experiment"}),
                  ("What would you break next to test resilience, and what did the last experiment teach us?", {"history", "rank_experiments"})]
 
 

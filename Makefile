@@ -18,5 +18,5 @@ report:
 	$(PY) -m faultline.cli report
 test:
 	$(PY) -m pytest tests -q
-run:
-	.venv/bin/streamlit run streamlit_app.py
+run:  ## the site on http://localhost:8600
+	.venv/bin/uvicorn faultline.api:app --port 8600

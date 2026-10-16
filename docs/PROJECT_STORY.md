@@ -23,9 +23,9 @@ approval is bound to a hash of the evidence.
 
 ## How it was built
 
-Python, FalkorDB, Jaeger's HotROD demo running as four containers, Streamlit. Core on day one: ingest, critical path,
+Python, FalkorDB, Jaeger's HotROD demo running as four containers, FastAPI, and a hand-built front end (d3 for the graph). Core on day one: ingest, critical path,
 findings, experiments, fixes. Day two: the agent, the approval ledger, the Monocle-style planner, guardrails, retry
-detection, UI, recorded public mode.
+detection, the web console, recorded public mode.
 
 ## What I measured (all reproducible with `make up && make baseline && make experiment && make fix`)
 

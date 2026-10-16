@@ -3,6 +3,6 @@ requests==2.33.0
 pytest==8.4.2
 pyyaml==6.0.3
 google-genai==2.31.0
-streamlit==1.66.0
-pyvis==0.3.2
 pandas==3.0.6
+fastapi==0.135.1
+uvicorn==0.42.0

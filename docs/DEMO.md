@@ -1,6 +1,6 @@
 # Demo script (2:30)
 
-Stack up (`make up`), a baseline ingested (`make baseline`), UI running (`make run`), Jaeger at :16686 open in a tab.
+Stack up (`make up`), a baseline ingested (`make baseline`), the site running (`make run`, http://localhost:8600), Jaeger at :16686 open in a tab.
 
 1. **Findings (0:00–0:35).** "HotROD, Jaeger's own demo app, four services in four containers, real OpenTelemetry
    traces. Faultline ingests a window of traces into FalkorDB and computes the critical path of every request." Point at
