@@ -94,6 +94,9 @@ def propose_experiment(st: Store, service: str, rationale: str = "") -> dict:
 def propose_fix(st: Store, flags: list[str], rationale: str = "") -> dict:
     if not flags or flags[0] not in experiments.FIX_FLAGS:
         return {"ok": False, "error": f"flags must start with one of {sorted(experiments.FIX_FLAGS)}"}
+    applied = st.q("MATCH (f:Fix {verdict:'VERIFIED'}) WHERE f.flags STARTS WITH $flag RETURN f.id ORDER BY f.ts DESC LIMIT 1", {"flag": flags[0]})
+    if applied:
+        return {"ok": False, "error": f"{flags[0]} is already applied and VERIFIED ({applied[0][0]}); use next_fix for what the graph points at now"}
     try:
         p = _fix_payload(st, flags)
         return _store(st, p, f"Restart {p['service']} with {' '.join(flags)} and verify through the gates",

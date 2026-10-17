@@ -127,6 +127,7 @@ def test_incident_issue_and_pr_proposals(st, tmp_path, monkeypatch):
     assert (tmp_path / r["written"] / "PR_BODY.md").exists()
     # a PR for a VERIFIED fix recorded in the graph
     st.q("MATCH (b:Window {id:$b}), (a:Window {id:$a}), (s:Service {name:'customer'}) CREATE (f:Fix {id:'fix-t', service:'customer', flags:'-M', verdict:'VERIFIED', gates:['PASS x'], next_owner:'n', ts:1})-[:TARGETS]->(s) CREATE (f)-[:BEFORE]->(b) CREATE (f)-[:AFTER]->(a)", {"b": base_w, "a": bad_w})
+    assert actions.propose_fix(st, ["-M"])["ok"] is False and "already applied" in actions.propose_fix(st, ["-M"])["error"]
     pr2 = actions.propose_pr(st, "fix-t"); r2 = actions.approve(st, pr2["action"])
     assert r2["ok"] and "deploy/docker-compose.fix.yml" in r2["files"] and "-M" in (tmp_path / r2["written"] / "deploy/docker-compose.fix.yml").read_text()
 
