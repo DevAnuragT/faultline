@@ -29,6 +29,18 @@ Pause `route`: the graph predicted the outage, the run confirmed it, and found t
 
 The agent chooses graph tools, shows every call, and proposes. A person approves; approval is bound to a hash of the evidence.
 
+## Setup (local, about five minutes)
+
+Prerequisites: Docker with Compose, Python 3.12, free ports 6379 (FalkorDB), 3000 (FalkorDB Browser), 8080 (HotROD),
+16686 (Jaeger) and 8600 (the console). Change the FalkorDB host ports in `.env` if 6379 or 3000 are taken.
+
+```
+git clone https://github.com/DevAnuragT/reachable.git -b faultline faultline && cd faultline
+cp .env.example .env          # local defaults; add OPENROUTER_API_KEY, GEMINI_API_KEY or ANTHROPIC_API_KEY for the agent (optional)
+make venv                     # Python virtualenv with pinned dependencies
+make test                     # 23 tests against the local FalkorDB (needs `make up` first)
+```
+
 ```
 make up          # Jaeger + HotROD (4 service containers) + FalkorDB
 make baseline    # 40 parallel /dispatch requests -> a Window in FalkorDB with critical paths and findings
@@ -54,8 +66,20 @@ operation on the critical path), *hang* (an experiment showed no timeout), *retr
 actuator for each class, if it has one: here HotROD's flags, in production a feature flag, a pool size or a Helm value
 (`experiments.ACTUATORS`). A remedy without an actuator is still reported as advice; nothing is invented as a command.
 The experiment planner ranks targets the way Netflix's Monocle did (criticality × safety, recency, review gate), with
-the experiment ledger in the graph as its memory. The agent (Gemini, tool-calling) only reads the graph and proposes;
-a human approves; approval is bound to a hash of the evidence.
+the experiment ledger in the graph as its memory. The agent (tool-calling, on OpenRouter, Claude or Gemini) only reads the
+graph and proposes; a human approves; approval is bound to a hash of the evidence.
+
+**Why FalkorDB is load-bearing.** Spans, windows, experiments, fixes, approvals and the agent's memory are one property graph.
+The critical-path shares are an aggregation over `Span-[:OF]->Trace`; single points of failure come from `algo.betweenness`;
+the blast radius of stopping a service is a variable-length `CALLS` path query; every verdict is a comparison between two
+`Window` nodes; every approval re-derives its evidence from the graph. Remove FalkorDB and nothing here can decide anything.
+
+**Data.** Every number comes from synthetic traffic against Jaeger's public HotROD demo app running on the author's machine.
+No private, personal or third-party data is loaded.
+
+**AI assistance, disclosed.** Built with AI coding assistants (Claude via Claude Code, including a design subagent for the
+console). The graph model, the algorithms, the gates, the actuator design and the measurements are the author's decisions
+and were verified by the author; `docs/PROJECT_STORY.md` has the full account and a rehearsal section explaining each part.
 
 Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 
