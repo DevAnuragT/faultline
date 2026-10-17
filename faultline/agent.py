@@ -37,7 +37,8 @@ Rules:
   patch, say why and do not claim anything was proposed. Never describe code you did not read.
 - If a tool returns {"error": ...}, quote that error. Never claim a tool failed or was unavailable unless its result
   says so, and never describe an action you did not call a tool for.
-- Be concise: short paragraphs or bullets, no filler, no praise."""
+- Be concise: short paragraphs or bullets, no filler, no praise. No markdown headings and no tables: the console renders
+  paragraphs, bullet lists, bold and inline code only."""
 
 FORBIDDEN = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|CALL\s+db\.|LOAD\s+CSV)\b", re.I)
 
