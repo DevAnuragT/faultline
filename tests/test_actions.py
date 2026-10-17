@@ -165,3 +165,19 @@ def test_contention_is_detected_from_in_flight_overlap(st):
     assert c and c[0]["service"] == "mysql" and c[0]["per_inflight_ms"] > 150 and c[0]["correlation"] > 0.8
     r = planner.remedies(st, w)[0]
     assert r["kind"] == "contention" and r["actuator"]["flags"] == ["-M"] and "per concurrent call" in r["evidence"]
+
+
+def test_agent_prefers_openrouter_over_gemini_and_degrades(st, monkeypatch):
+    from faultline.agent import Agent
+    from faultline import openrouter_agent
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(config, "OPENROUTER_API_KEY", "not-a-real-key")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+    ag = Agent(st)
+    assert ag.provider == "openrouter" and ag.model == config.OPENROUTER_MODEL
+    schemas = ag._router.schemas
+    assert any(s["function"]["name"] == "propose_code_change" and set(s["function"]["parameters"]["required"]) == {"service", "op", "patch", "summary"} for s in schemas)
+    reply, trace = ag.ask("What is slow and why?")
+    if "APIConnectionError" in reply:
+        pytest.skip("no network")
+    assert reply.startswith("(OpenRouter unavailable:") and trace[0]["tool"] == "overview" and "mysql" in reply

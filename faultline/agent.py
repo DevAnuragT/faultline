@@ -261,14 +261,27 @@ class Agent:
         self.model = ""
         self.provider = "offline"
         self.live = False
-        try:
-            from . import claude_agent
-            if claude_agent.available():
-                self._claude = claude_agent.ClaudeChat(self.box, SYSTEM)
-                self.model, self.provider, self.live = self._claude.model, "claude", True
-                return
-        except Exception:  # SDK missing or misconfigured: fall through to Gemini
-            pass
+        want = config.AGENT_PROVIDER
+        if want in ("", "claude"):
+            try:
+                from . import claude_agent
+                if claude_agent.available():
+                    self._claude = claude_agent.ClaudeChat(self.box, SYSTEM)
+                    self.model, self.provider, self.live = self._claude.model, "claude", True
+                    return
+            except Exception:  # SDK missing or misconfigured: fall through
+                pass
+        if want in ("", "openrouter"):
+            try:
+                from . import openrouter_agent
+                if openrouter_agent.available():
+                    self._router = openrouter_agent.OpenRouterChat(self.box, SYSTEM)
+                    self.model, self.provider, self.live = self._router.model, "openrouter", True
+                    return
+            except Exception:
+                pass
+        if want == "offline":
+            return
         self.live = bool(config.GEMINI_API_KEY)
         if self.live:
             self.provider = "gemini"
@@ -302,6 +315,28 @@ class Agent:
                 return self._claude.send(message), self.box.trace[start:]
             except Exception as exc:
                 return f"(Claude unavailable: {exc.__class__.__name__}; answering from graph tools directly)\n\n" + self._offline(message), self.box.trace[start:]
+        if self.provider == "openrouter":
+            from . import openrouter_agent
+            chain = [self._router.model] + [m for m in config.OPENROUTER_FALLBACK_MODELS if m != self._router.model]
+            last: Exception | None = None
+            for model in chain:
+                try:
+                    self._router.model = model
+                    reply = self._router.send(message)
+                    self.model = model
+                    return reply, self.box.trace[start:]
+                except Exception as exc:
+                    last = exc
+                    if not openrouter_agent.is_quota_error(exc) and not (hasattr(exc, "status_code") and exc.status_code >= 500):
+                        break
+                    self._router.messages = [m for m in self._router.messages if m.get("role") != "user" or m is not self._router.messages[-1]]
+            if config.GEMINI_API_KEY:  # OpenRouter gave up: continue the turn on Gemini
+                self.provider = "gemini"
+                self._new_chat(llm.models()[0])
+                self.live = True
+                reply, trace = self._ask(message)
+                return f"(OpenRouter unavailable: {last.__class__.__name__}; continued on Gemini {self.model})\n\n" + reply, trace
+            return f"(OpenRouter unavailable: {last.__class__.__name__}; answering from graph tools directly)\n\n" + self._offline(message), self.box.trace[start:]
         if self.live:
             last: Exception | None = None
             for _ in range(len(config.GEMINI_FALLBACK_MODELS) + 1):

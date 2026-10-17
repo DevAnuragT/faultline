@@ -122,8 +122,11 @@ Approval for all of these is the same hashed-evidence path as experiments and fi
 ## The agent's model
 
 The agent runs on whichever provider has credentials, in this order: **Claude** (`ANTHROPIC_API_KEY`; model `claude-opus-5-5`,
-override with `CLAUDE_MODEL`), then **Gemini** (`GEMINI_API_KEY`, with a fallback chain), then an **offline** mode that
-answers from the same graph tools without a model. The tools, the proposals and the approval path are identical on all three;
+override with `CLAUDE_MODEL`), then **OpenRouter** (`OPENROUTER_API_KEY`; model `openrouter/free` by default, which picks a
+tool-capable free model, override with `OPENROUTER_MODEL`, fallbacks in `OPENROUTER_FALLBACK_MODELS`), then **Gemini**
+(`GEMINI_API_KEY`, with a fallback chain), then an **offline** mode that answers from the same graph tools without a model.
+Force one with `AGENT_PROVIDER`. OpenRouter's free tier allows 20 requests a minute and 50 a day (1,000 a day once $10 of
+credits were ever bought); an answer is three to five requests, and when OpenRouter runs out the same turn continues on Gemini. The tools, the proposals and the approval path are identical on all three;
 only the prose differs. Every tool call is recorded and shown.
 
 ## MCP

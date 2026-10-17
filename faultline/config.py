@@ -35,3 +35,7 @@ GITHUB_REPO = os.environ.get("GITHUB_REPO", "")        # owner/repo: PRs and iss
 GITHUB_BASE = os.environ.get("GITHUB_BASE", "faultline")
 SLO_P95_MS = float(os.environ["SLO_P95_MS"]) if os.environ.get("SLO_P95_MS") else None
 SLO_FAIL_RATE = float(os.environ["SLO_FAIL_RATE"]) if os.environ.get("SLO_FAIL_RATE") else None
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter/free")   # the free router picks a tool-capable free model
+OPENROUTER_FALLBACK_MODELS = [m.strip() for m in os.environ.get("OPENROUTER_FALLBACK_MODELS", "qwen/qwen3-coder:free").split(",") if m.strip()]
+AGENT_PROVIDER = os.environ.get("AGENT_PROVIDER", "")  # force one: claude | openrouter | gemini | offline; empty = first with a key
