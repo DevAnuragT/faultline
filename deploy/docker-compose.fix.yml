@@ -1,0 +1,6 @@
+services:
+  customer:
+    command:
+    - customer
+    - -D
+    - 100ms
