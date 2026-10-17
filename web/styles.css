@@ -859,3 +859,19 @@ a.linkish { cursor: pointer; }
   .drawer { inset: auto 0 0 0; width: 100vw; height: 85vh; height: 85dvh; border-left: 0; border-top: 1px solid var(--line-2); border-radius: 12px 12px 0 0; }
   .drawer-note { text-align: left; }
 }
+
+/* agent replies: headings as bold lines, compact tables, numbered lists, rules */
+.md .md-h { font-weight: 600; color: var(--fg); margin: 14px 0 4px; }
+.md .md-h:first-child { margin-top: 0; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md ol { margin: 4px 0 10px; padding-left: 22px; display: grid; gap: 4px; }
+.md ol:last-child { margin-bottom: 0; }
+.md li::marker { color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.md-table { margin: 6px 0 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+.md-table:last-child { margin-bottom: 0; }
+.md-table table { font-size: 12.5px; line-height: 1.45; }
+.md-table th { padding: 7px 10px; background: var(--raised); white-space: nowrap; }
+.md-table td { padding: 7px 10px; vertical-align: top; }
+.md-table td.num, .md-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.md-table tbody tr:first-child td { border-top: 0; }
+.md-table code { white-space: nowrap; }

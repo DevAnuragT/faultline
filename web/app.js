@@ -126,7 +126,7 @@ async function boot() {
   $("#cmp-a").addEventListener("change", loadCompare); $("#cmp-b").addEventListener("change", loadCompare);
   state.recorded = await api("/api/agent/recorded");
   if (state.recorded.turns?.length) {
-    for (const t of state.recorded.turns) state.chat.push({ role: "user", text: t.prompt }, { role: "assistant", text: t.reply, trace: t.trace, model: state.recorded.model, recorded: true });
+    for (const t of state.recorded.turns) state.chat.push({ role: "user", text: t.prompt }, { role: "assistant", text: t.reply, trace: t.trace, model: t.model || state.recorded.model, recorded: true });
     $("#agent-hint").textContent = `A recorded conversation with ${state.recorded.model} from ${state.recorded.recorded_at.slice(0, 10)}, with every graph tool call it made. Ask your own question below; proposals land in Approvals and never run on their own.`;
   }
   renderChat();
@@ -373,11 +373,43 @@ async function loadCompare() {
 }
 
 /* ---------- agent ---------- */
+/* Markdown for agent replies. Everything is escaped first, so the model can never inject HTML; then a small block parser
+   handles headings (a bold line, not a page heading), pipe tables, bullet and numbered lists, rules, code fences and inline code. */
 function md(text) {
-  let h = esc(text).replace(/```[\s\S]*?```/g, (m) => `<pre class="mono">${m.replace(/```\w*\n?/g, "")}</pre>`).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/^### (.*)$/gm, "<b>$1</b>");
-  const lines = h.split("\n"); let out = "", inList = false;
-  for (const ln of lines) { const li = ln.match(/^\s*[-*]\s+(.*)/); if (li) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${li[1]}</li>`; } else { if (inList) { out += "</ul>"; inList = false; } if (ln.trim()) out += `<p>${ln}</p>`; } }
-  return out + (inList ? "</ul>" : "");
+  const keep = [];
+  const stash = (html) => `\u0000${keep.push(html) - 1}\u0000`;
+  let src = esc(text).replace(/\r\n?/g, "\n")
+    .replace(/```[^\n]*\n?([\s\S]*?)```/g, (m, code) => `\n${stash(`<pre class="mono">${code.replace(/\n$/, "")}</pre>`)}\n`);
+  const inl = (x) => x.replace(/`([^`]+)`/g, (m, c) => stash(`<code>${c}</code>`))
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/__([^_]+)__/g, "<b>$1</b>")
+    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?![*\w])/g, "$1<i>$2</i>");
+  const cells = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const isAlign = (row) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(row);
+  const lines = src.split("\n"); let out = "", list = null;
+  const close = () => { if (list) { out += `</${list}>`; list = null; } };
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i], t = ln.trim();
+    if (!t) { close(); continue; }
+    if (/^\u0000\d+\u0000$/.test(t)) { close(); out += t; continue; }
+    let m;
+    if ((m = t.match(/^#{1,6}\s+(.*?)\s*#*$/))) { close(); out += `<p class="md-h">${inl(m[1])}</p>`; continue; }
+    if (/^([-*_])(\s*\1){2,}$/.test(t)) { close(); out += "<hr>"; continue; }
+    if (t.startsWith("|") && i + 1 < lines.length && isAlign(lines[i + 1])) {
+      close();
+      const head = cells(t), align = cells(lines[i + 1]).map((c) => (/^-+:$/.test(c) ? "num" : ""));
+      const body = []; i += 2;
+      while (i < lines.length && lines[i].trim().startsWith("|")) body.push(cells(lines[i++]));
+      i--;
+      out += `<div class="md-table"><table><thead><tr>${head.map((c, k) => `<th class="${align[k] || ""}">${inl(c)}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${head.map((_, k) => `<td class="${align[k] || ""}">${inl(r[k] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+      continue;
+    }
+    if ((m = ln.match(/^\s*[-*+]\s+(.*)/))) { if (list !== "ul") { close(); out += "<ul>"; list = "ul"; } out += `<li>${inl(m[1])}</li>`; continue; }
+    if ((m = ln.match(/^\s*(\d+)[.)]\s+(.*)/))) { if (list !== "ol") { close(); out += `<ol${m[1] !== "1" ? ` start="${m[1]}"` : ""}>`; list = "ol"; } out += `<li>${inl(m[2])}</li>`; continue; }
+    if (list && /^\s{2,}\S/.test(ln)) { out = out.replace(/<\/li>$/, ` ${inl(t)}</li>`); continue; }
+    close(); out += `<p>${inl(t)}</p>`;
+  }
+  close();
+  return out.replace(/\u0000(\d+)\u0000/g, (m, k) => keep[+k]).replace(/\u0000(\d+)\u0000/g, (m, k) => keep[+k]);
 }
 function callList(trace) {
   if (!trace?.length) return "";
