@@ -205,11 +205,11 @@ function drawGraph(o) {
   const sim = d3.forceSimulation(nodes).force("link", d3.forceLink(links).id((d) => d.id).distance(Math.min(210, W / 3.8))).force("charge", d3.forceManyBody().strength(narrow ? -1100 : -1800)).force("collide", d3.forceCollide(narrow ? 54 : 66))
     .force("center", d3.forceCenter(W / 2, H / 2)).force("x", d3.forceX((d) => d.edge ? W * 0.13 : d.store ? W * 0.86 : W / 2).strength(0.3)).force("y", d3.forceY(H / 2).strength(0.04));
   const defs = svg.append("defs");
-  for (const [id, color] of [["arrow", "--line-2"], ["arrow-err", "--crit"]])
+  for (const [id, color] of [["arrow", "--fg-3"], ["arrow-err", "--crit"]])
     defs.append("marker").attr("id", id).attr("viewBox", "0 -4 8 8").attr("refX", 8).attr("markerWidth", 8).attr("markerHeight", 8).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
       .append("path").attr("d", "M0,-4L8,0L0,4").style("fill", V(color));
-  const link = svg.append("g").selectAll("line").data(links).join("line").attr("class", "edge").style("stroke", (d) => d.errors ? V("--crit") : V("--line-2"))
-    .attr("stroke-width", (d) => 1.2 + Math.min(d.per_trace, 14) / 2.4).attr("marker-end", (d) => d.errors ? "url(#arrow-err)" : "url(#arrow)").attr("stroke-opacity", 0.9).attr("stroke-linecap", "round");
+  const link = svg.append("g").selectAll("line").data(links).join("line").attr("class", "edge").style("stroke", (d) => d.errors ? V("--crit") : V("--fg-3"))
+    .attr("stroke-width", (d) => 1.6 + Math.min(d.per_trace, 14) / 2.4).attr("marker-end", (d) => d.errors ? "url(#arrow-err)" : "url(#arrow)").attr("stroke-opacity", (d) => d.errors ? 0.95 : 0.75).attr("stroke-linecap", "round");
   /* wide transparent strokes make thin edges easy to hover */
   const hit = svg.append("g").selectAll("line").data(links).join("line").attr("class", "edge-hit").attr("stroke-width", 14).style("stroke", "transparent").style("pointer-events", "stroke");
   const elabel = svg.append("g").selectAll("text").data(links).join("text").attr("class", "edge-label").attr("text-anchor", "middle").text((d) => `${fmt(d.per_trace, 1)}/req${d.errors ? ` · ${d.errors} err` : ""}`);
@@ -219,6 +219,7 @@ function drawGraph(o) {
   node.append("rect").attr("x", -NW / 2 + 6).attr("y", NH / 2 - 6).attr("height", 3).attr("rx", 1.5).attr("width", (d) => d.share >= 1 ? Math.max(3, (NW - 12) * d.share / 100) : 0).style("fill", V("--ember"));
   node.append("text").attr("text-anchor", "middle").attr("dy", "-2").text((d) => d.id);
   node.append("text").attr("text-anchor", "middle").attr("dy", "11").attr("class", "node-sub").text((d) => d.share >= 1 ? `${Math.round(d.share)}% of latency` : d.edge ? "edge" : d.store ? "data store" : "");
+  node.filter((d) => d.store).append("circle").attr("cx", NW / 2 - 7).attr("cy", -NH / 2 + 7).attr("r", 3.2).style("fill", V("--store")).append("title").text("data store");
   node.on("mousemove", (ev, d) => tip(ev, `${d.id}\n${d.share ? `${d.share.toFixed(1)}% of critical-path latency` : "not on the critical path"}`)).on("mouseleave", hideTip);
   hit.on("mousemove", (ev, d) => tip(ev, `${d.from} → ${d.to}\n${d.count} calls, ${d.errors} errors\np50 ${fmt(d.p50_ms)} ms · p95 ${fmt(d.p95_ms)} ms\n${fmt(d.per_trace, 1)} calls per request`)).on("mouseleave", hideTip);
   /* end each edge at the target's box border so the arrowhead stays visible */
@@ -226,7 +227,9 @@ function drawGraph(o) {
   sim.on("tick", () => {
     nodes.forEach((d) => { d.x = Math.max(NW / 2 + 4, Math.min(W - NW / 2 - 4, d.x)); d.y = Math.max(NH / 2 + 6, Math.min(H - NH / 2 - 6, d.y)); });
     for (const sel of [link, hit]) sel.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y).attr("x2", (d) => clip(d.source, d.target)[0]).attr("y2", (d) => clip(d.source, d.target)[1]);
-    elabel.attr("x", (d) => (d.source.x + d.target.x) / 2).attr("y", (d) => (d.source.y + d.target.y) / 2 - 6);
+    /* labels sit beside the edge, offset along its normal, never on the line */
+    elabel.attr("x", (d) => { const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y, L = Math.hypot(dx, dy) || 1; return (d.source.x + d.target.x) / 2 - (dy / L) * 10; })
+      .attr("y", (d) => { const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y, L = Math.hypot(dx, dy) || 1; return (d.source.y + d.target.y) / 2 + (dx / L) * 10 + 3; });
     node.attr("transform", (d) => `translate(${d.x},${d.y})`);
   });
 }
@@ -526,7 +529,7 @@ function drawSchema(counts) {
   const W = svg.node().clientWidth || 700, H = svg.node().clientHeight || 500; svg.attr("viewBox", `0 0 ${W} ${H}`);
   const pos = {}; SCHEMA.nodes.forEach((n) => (pos[n.id] = { x: Math.max(56, Math.min(W - 56, n.x * W)), y: n.y * H }));
   svg.append("defs").append("marker").attr("id", "sarrow").attr("viewBox", "0 -4 8 8").attr("refX", 8).attr("markerWidth", 8).attr("markerHeight", 8).attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
-    .append("path").attr("d", "M0,-4L8,0L0,4").style("fill", V("--line-2"));
+    .append("path").attr("d", "M0,-4L8,0L0,4").style("fill", V("--fg-3"));
   const g = svg.append("g");
   for (const [a, b, rel, at = 0.5] of SCHEMA.edges) {
     const A = pos[a], B = pos[b];
@@ -536,13 +539,13 @@ function drawSchema(counts) {
       if (side === "left") { d = `M${A.x - 48},${A.y - 10} C${A.x - 108},${A.y - 42} ${A.x - 108},${A.y + 26} ${A.x - 48},${A.y + 10}`; lx = Math.max(4, A.x - 104); ly = A.y + 42; anchor = "start"; }
       else if (side === "top") { d = `M${A.x - 14},${A.y - 18} C${A.x - 50},${A.y - 70} ${A.x + 50},${A.y - 70} ${A.x + 14},${A.y - 18}`; lx = A.x; ly = A.y - 62; }
       else { d = `M${A.x + 48},${A.y - 10} C${A.x + 108},${A.y - 42} ${A.x + 108},${A.y + 26} ${A.x + 48},${A.y + 10}`; lx = A.x + 80; ly = A.y + 40; }
-      g.append("path").attr("d", d).style("fill", "none").style("stroke", V("--line-2")).attr("stroke-width", 1.2).attr("marker-end", "url(#sarrow)");
+      g.append("path").attr("d", d).style("fill", "none").style("stroke", V("--fg-3")).attr("stroke-opacity", 0.8).attr("stroke-width", 1.4).attr("marker-end", "url(#sarrow)");
       g.append("text").attr("class", "rel").attr("x", lx).attr("y", ly).attr("text-anchor", anchor).text(rel);
       continue;
     }
     const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L;
     const x1 = A.x + ux * 50, y1 = A.y + uy * 19, x2 = B.x - ux * 54, y2 = B.y - uy * 21;
-    g.append("line").attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2).style("stroke", V("--line-2")).attr("stroke-width", 1.2).attr("marker-end", "url(#sarrow)");
+    g.append("line").attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2).style("stroke", V("--fg-3")).attr("stroke-opacity", 0.8).attr("stroke-width", 1.4).attr("marker-end", "url(#sarrow)");
     const mx = x1 + (x2 - x1) * at, my = y1 + (y2 - y1) * at;
     const t = g.append("text").attr("class", "rel").attr("x", mx).attr("y", my - 5).attr("text-anchor", "middle").text(rel);
     const bb = t.node().getBBox();
@@ -550,7 +553,7 @@ function drawSchema(counts) {
   }
   const node = svg.append("g").selectAll("g").data(SCHEMA.nodes).join("g").attr("transform", (d) => `translate(${pos[d.id].x},${pos[d.id].y})`);
   node.append("rect").attr("x", -50).attr("y", -19).attr("width", 100).attr("height", 38).attr("rx", 6).style("fill", V("--raised"))
-    .style("stroke", (d) => ["Span", "Experiment", "Fix", "Action"].includes(d.id) ? V("--fg-3") : V("--line-2")).attr("stroke-width", 1.3);
+    .style("stroke", (d) => ["Span", "Experiment", "Fix", "Action"].includes(d.id) ? V("--fg-2") : V("--fg-3")).attr("stroke-width", (d) => ["Span", "Experiment", "Fix", "Action"].includes(d.id) ? 1.6 : 1.2);
   node.append("text").attr("text-anchor", "middle").attr("dy", "-2").text((d) => `:${d.id}`);
   node.append("text").attr("class", "sub").attr("text-anchor", "middle").attr("dy", "12").text((d) => counts[d.id] != null ? `${counts[d.id].toLocaleString()} nodes` : "");
   node.append("title").text((d) => `${d.id} {${d.sub}}`);

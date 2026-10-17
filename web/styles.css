@@ -397,8 +397,8 @@ body.loading .kpi .val small { visibility: hidden; }
 .graph-scroll { min-height: 420px; }
 #svc-graph { width: 100%; height: 100%; min-height: 420px; display: block; }
 #svc-graph text { font-family: var(--mono); font-size: 11.5px; fill: var(--fg); }
-#svc-graph .node-sub { fill: var(--fg-3); font-size: 10px; }
-#svc-graph .edge-label { fill: var(--fg-3); font-size: 10px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+#svc-graph .node-sub { fill: var(--fg-2); font-size: 10.5px; }
+#svc-graph .edge-label { fill: var(--fg-2); font-size: 10.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 5px; stroke-linejoin: round; }
 #svc-graph g.node { cursor: grab; }
 #svc-graph g.node:hover rect.box { fill: var(--raised); }
 #svc-graph line.edge-hit { cursor: help; }
@@ -413,8 +413,8 @@ body.loading .kpi .val small { visibility: hidden; }
 .schema-scroll { overflow-x: auto; position: relative; }
 #schema { width: 100%; min-width: 600px; height: 500px; display: block; }
 #schema text { font-family: var(--mono); font-size: 11px; fill: var(--fg); }
-#schema .rel { fill: var(--fg-3); font-size: 10px; }
-#schema .sub { fill: var(--fg-3); font-size: 10px; }
+#schema .rel { fill: var(--fg-2); font-size: 10.5px; }
+#schema .sub { fill: var(--fg-2); font-size: 10px; }
 
 /* ---------- graph view ---------- */
 .field { display: grid; gap: 6px; min-width: 0; }
