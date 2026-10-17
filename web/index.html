@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="styles.css?v=0c6ccb50">
+<link rel="stylesheet" href="styles.css?v=tsearch3">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2310151c'/%3E%3Cpath d='M6 21 L12.5 11 L17.5 18 L21.5 13 L26 21' fill='none' stroke='%23ff8a3d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 </head>
@@ -181,15 +181,24 @@
       <section class="view" id="view-trace" aria-labelledby="t-trace" hidden>
         <header class="view-head">
           <h2 id="t-trace">Trace</h2>
-          <p>The slowest steady-state request in this window, span by span, with the chain it actually waited on. Open any other request by id.</p>
+          <p>The slowest steady-state request in this window, span by span, with the chain it actually waited on. Search for any other request by service, operation, status, id or duration.</p>
         </header>
         <div class="trace-bar">
-          <form id="trace-form" class="trace-search" role="search">
-            <label class="sr-only" for="trace-q">Trace id</label>
-            <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
-            <input id="trace-q" type="text" placeholder="Open a trace by id" autocomplete="off" spellcheck="false">
-            <button class="btn small" type="submit">Open trace</button>
-          </form>
+          <div class="trace-find" id="trace-find-root">
+            <form id="trace-form" class="trace-search" role="search">
+              <label class="sr-only" for="trace-q">Search requests</label>
+              <span class="ts-field">
+                <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+                <input id="trace-q" type="search" placeholder="Search: service, operation, status, trace id, >500ms, errors" autocomplete="off" spellcheck="false" aria-describedby="trace-q-hint">
+                <button class="trace-clear" id="trace-clear" type="button" aria-label="Clear the search" title="Clear" hidden><svg class="ico" aria-hidden="true"><use href="#i-close"/></svg></button>
+              </span>
+              <button class="btn small" type="submit">Open first</button>
+            </form>
+            <div class="trace-suggest" id="trace-suggest" role="listbox" aria-label="Matching requests" hidden></div>
+            <div class="trace-examples" role="group" aria-label="Example searches"><span class="hint" id="trace-q-hint">Try</span>
+              <button type="button" data-trace-q="errors">errors</button><button type="button" data-trace-q=">1s">&gt;1s</button><button type="button" data-trace-q="route">route</button><button type="button" data-trace-q="GetDriver">GetDriver</button>
+            </div>
+          </div>
           <p class="trace-mode" id="trace-mode"></p>
         </div>
         <article class="panel">
@@ -208,7 +217,7 @@
             </div>
           </article>
           <article class="panel">
-            <div class="panel-head"><div class="ttl"><h3>Requests</h3><p class="sub">Pick the request the waterfall shows, slowest first.</p></div>
+            <div class="panel-head"><div class="ttl"><h3>Requests</h3><p class="sub" id="trace-list-sub">Pick the request the waterfall shows, slowest first.</p></div>
               <div class="seg" role="group" aria-label="Which requests to list"><button type="button" data-trace-filter="slowest" aria-pressed="true">Slowest</button><button type="button" data-trace-filter="errors" aria-pressed="false">With errors</button></div></div>
             <div class="table-wrap bleed">
               <table id="trace-list"><thead><tr><th>Trace</th><th class="num">ms</th><th>Status</th><th class="act"><span class="sr-only">Open</span></th></tr></thead>
@@ -377,6 +386,6 @@
   <div class="sheet-foot"><span class="hint">Links keep the view, the window and the open trace, so they can be pasted into an incident channel.</span><button class="btn small" type="button" data-tour-start>Take the tour</button></div>
 </dialog>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-<script src="app.js?v=0c6ccb50"></script>
+<script src="app.js?v=tsearch3"></script>
 </body>
 </html>

@@ -41,6 +41,7 @@ const ICON = {
   flask: '<path d="M7.5 2.75h5M8.25 2.75v5.1L3.9 15.2A1.4 1.4 0 0 0 5.1 17.25h9.8a1.4 1.4 0 0 0 1.2-2.05l-4.35-7.35v-5.1"/>',
   fp: '<path d="M6 16c1-1.5 1.5-3.5 1.5-6a2.5 2.5 0 0 1 5 0c0 1.5-.2 3-.6 4.3M10 10c0 2.6-.6 4.9-1.8 6.7M4.2 13.3c.5-1 .8-2.1.8-3.3a5 5 0 0 1 9.4-2.4M15 10.5c0 1.4-.2 2.7-.5 3.9"/>',
   mark: '<path d="M5 21 L12 10.5 L17.5 18 L21.5 13 L27 21"/>',
+  search: '<circle cx="8.75" cy="8.75" r="5"/><path d="M12.5 12.5l4 4"/>',
 };
 const icon = (name, cls = "") => `<svg viewBox="${name === "mark" ? "0 0 32 32" : "0 0 20 20"}" class="${cls}" aria-hidden="true">${ICON[name]}</svg>`;
 const empty = (title, text, ic = "info") => `<div class="empty">${icon(ic)}<div><b>${esc(title)}</b>${text ? `<p>${text}</p>` : ""}</div></div>`;
@@ -296,26 +297,69 @@ function renderChain(chain) {
     || `<tr><td colspan="5">${empty("No critical spans", "This trace has no spans marked on the critical path.")}</td></tr>`;
 }
 /* the request list comes from /api/traces: slowest first, or only the requests with error spans */
+/* the Requests list: /api/traces with free-text search (service, operation, status, id prefix, >500ms, errors) */
+let traceSeq = 0;
 async function loadTraceList(w) {
-  const errors = state.traceFilter === "errors";
-  $$("[data-trace-filter]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.traceFilter === (errors ? "errors" : "slowest"))));
+  const toggleErrors = state.traceFilter === "errors", q = (state.traceQuery || "").trim(), seq = ++traceSeq;
+  $$("[data-trace-filter]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.traceFilter === (toggleErrors ? "errors" : "slowest"))));
   let r;
-  try { r = await api(`/api/traces?window=${encodeURIComponent(w)}&order=duration&errors=${errors}&limit=12`); }
+  try { r = await api(`/api/traces?window=${encodeURIComponent(w)}&order=duration&errors=${toggleErrors}&limit=12${q ? `&q=${encodeURIComponent(q)}` : ""}`); }
   catch (e) { r = { error: e.message }; }
-  if (state.window !== w) return;
+  if (state.window !== w || seq !== traceSeq) return null;
+  state.traceRows = r.traces || [];
+  const qd = r.query || {}, bits = [];
+  if (qd.q) bits.push(`“${esc(qd.q)}”`);
+  if (qd.min_ms != null) bits.push(`over ${fmt(qd.min_ms)} ms`);
+  if (qd.max_ms != null) bits.push(`under ${fmt(qd.max_ms)} ms`);
+  if (qd.errors || toggleErrors) bits.push("with errors");
+  $("#trace-list-sub").innerHTML = q || toggleErrors ? `${state.traceRows.length} request${state.traceRows.length === 1 ? "" : "s"} ${bits.length ? `matching ${bits.join(", ")}` : ""}, slowest first.` : "Pick the request the waterfall shows, slowest first.";
   $("#trace-list tbody").innerHTML = r.error ? `<tr><td colspan="4">${empty("Could not list requests", esc(r.error), "alert")}</td></tr>`
-    : r.traces.map((t) => `<tr data-trace="${esc(t.id)}"><td><span class="mono">${esc(String(t.id).slice(0, 12))}…</span>${copyBtn(t.id, "trace id")}<span class="cell-sub">${esc(t.root)}${t.start_us ? ` · ${clock(t.start_us)}` : ""}${t.errors ? ` · ${t.errors} error span${t.errors === 1 ? "" : "s"}` : ""}</span></td><td class="num">${fmt(t.duration_ms)}</td><td><span class="pill ${String(t.status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(t.status || "none")}</span></td><td class="act"><button class="btn small" type="button" data-trace-open="${esc(t.id)}">Open</button></td></tr>`).join("")
-    || `<tr><td colspan="4">${empty(errors ? "No request with errors" : "No requests", errors ? "Every request in this window ran without an error span." : "This window has no traces.", errors ? "check" : "info")}</td></tr>`;
+    : state.traceRows.map((t) => `<tr data-trace="${esc(t.id)}"><td><span class="mono">${esc(String(t.id).slice(0, 12))}…</span>${copyBtn(t.id, "trace id")}${q && t.match ? `<span class="tag match" title="Why this request matched">${esc(t.match)}</span>` : ""}<span class="cell-sub">${esc(t.root)}${t.start_us ? ` · ${clock(t.start_us)}` : ""}${t.errors ? ` · ${t.errors} error span${t.errors === 1 ? "" : "s"}` : ""}</span></td><td class="num">${fmt(t.duration_ms)}</td><td><span class="pill ${String(t.status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(t.status || "none")}</span></td><td class="act"><button class="btn small" type="button" data-trace-open="${esc(t.id)}">Open</button></td></tr>`).join("")
+    || `<tr><td colspan="4">${q ? empty("No request matches.", "Try a service name, &gt;500ms or errors.", "search") : empty(toggleErrors ? "No request with errors" : "No requests", toggleErrors ? "Every request in this window ran without an error span." : "This window has no traces.", toggleErrors ? "check" : "info")}</td></tr>`;
   markShownTrace();
+  renderSuggest();
+  return state.traceRows;
 }
+/* live matches right under the search box, so typing shows results without scrolling to the list */
+function renderSuggest() {
+  const box = $("#trace-suggest"), q = (state.traceQuery || "").trim();
+  if (!q || document.activeElement !== $("#trace-q")) { box.hidden = true; return; }
+  const rows = (state.traceRows || []).slice(0, 6);
+  box.innerHTML = rows.length ? rows.map((t) => `<button type="button" role="option" data-trace-open="${esc(t.id)}"><span class="mono">${esc(String(t.id).slice(0, 12))}…</span>${t.match ? `<span class="tag match">${esc(t.match)}</span>` : ""}<span class="sg-ms">${fmt(t.duration_ms)} ms</span><span class="pill ${String(t.status).startsWith("5") ? "bad" : "muted"}"><i></i>${esc(t.status || "none")}</span></button>`).join("")
+    + (state.traceRows.length > rows.length ? `<p class="sg-more hint">${state.traceRows.length - rows.length} more in the Requests list below</p>` : "")
+    : `<p class="sg-empty">No request matches. Try a service name, &gt;500ms or errors.</p>`;
+  box.hidden = false;
+}
+$("#trace-q").addEventListener("focus", renderSuggest);
+$("#trace-q").addEventListener("blur", () => setTimeout(() => { if (!$("#trace-find-root")?.contains(document.activeElement)) $("#trace-suggest").hidden = true; }, 150));
+$("#trace-q").addEventListener("keydown", (e) => { if (e.key === "Escape") { $("#trace-suggest").hidden = true; } });
 document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-trace-filter]"); if (b) { state.traceFilter = b.dataset.traceFilter; loadTraceList(state.window); } });
+let traceTimer;
+function setTraceQuery(v, now = false) {
+  state.traceQuery = v; $("#trace-clear").hidden = !v;
+  clearTimeout(traceTimer);
+  if (now) return loadTraceList(state.window);
+  traceTimer = setTimeout(() => loadTraceList(state.window), 250);
+}
+$("#trace-q").addEventListener("input", (e) => setTraceQuery(e.target.value));
+$("#trace-clear").addEventListener("click", () => { $("#trace-q").value = ""; setTraceQuery("", true); $("#trace-q").focus(); });
+$("#trace-suggest").addEventListener("mousedown", (e) => e.preventDefault());
+document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-trace-q]"); if (b) { $("#trace-q").value = b.dataset.traceQ; setTraceQuery(b.dataset.traceQ, true); } });
 function markShownTrace() { $$("#trace-list tr[data-trace]").forEach((tr) => { const on = tr.dataset.trace === state.shownTrace; tr.classList.toggle("current", on); const b = tr.querySelector("[data-trace-open]"); if (b) { b.disabled = on; b.textContent = on ? "Shown" : "Open"; } }); }
 function openTrace(id) {
   state.traceId = id || null;
   if (route().view !== "trace") { go("trace"); return; }
   syncHash("trace"); loadTrace(); window.scrollTo({ top: 0 });
 }
-$("#trace-form").addEventListener("submit", (e) => { e.preventDefault(); const id = $("#trace-q").value.trim().replace(/^.*[#?&]t=/, ""); openTrace(id); $("#trace-q").value = ""; });
+/* Enter: a pasted full id (or a link carrying t=) opens directly; anything else opens the first match */
+$("#trace-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const raw = $("#trace-q").value.trim(), id = raw.replace(/^.*[#?&]t=([0-9a-f]+).*$/i, "$1");
+  if (/^[0-9a-f]{16,32}$/i.test(id)) { openTrace(id); return; }
+  if (!raw) { openTrace(null); return; }
+  const rows = await setTraceQuery(raw, true);
+  if (rows?.length) openTrace(rows[0].id); else if (rows) toast("No request matches. Try a service name, >500ms or errors.");
+});
 document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-trace-open]"); if (b) { e.preventDefault(); openTrace(b.dataset.traceOpen); } });
 
 /* ---------- experiments ---------- */
