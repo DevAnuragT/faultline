@@ -60,8 +60,11 @@ def status(window: str | None = None):
 
 
 @app.get("/api/traces")
-def traces(window: str | None = None, order: str = "duration", errors: bool = False, limit: int = 20):
-    return {"window": _w(window), "traces": analysis.traces(st(), _w(window), order, errors, min(limit, 100))}
+def traces(window: str | None = None, order: str = "duration", errors: bool = False, limit: int = 20, q: str = ""):
+    """`q` is free text: a trace id prefix, a service or operation name, a status code, '>500ms', '<2s', 'errors'; combinable."""
+    f = analysis.parse_trace_query(q)
+    return {"window": _w(window), "query": f, "traces": analysis.traces(st(), _w(window), order, errors or f["errors"], min(limit, 100),
+                                                                      q=f["q"], min_ms=f["min_ms"], max_ms=f["max_ms"])}
 
 
 @app.get("/api/overview")

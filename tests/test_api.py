@@ -69,3 +69,17 @@ def test_status_traces_windows_and_actions(client):
     acts = client.get("/api/planner").json()["actions"]
     assert acts and acts == sorted(acts, key=lambda a: a["priority"]) and all(a["title"] and a["why"] for a in acts)
     assert any(a["type"] == "experiment" and a["payload"]["target"] in ("customer", "driver") for a in acts)
+
+
+def test_trace_search_by_name_status_duration_and_prefix(client):
+    all_ = client.get("/api/traces?limit=50").json()["traces"]
+    by_op = client.get("/api/traces?q=GetDriver").json()["traces"]
+    assert by_op and all(t["match"].startswith("redis-manual GetDriver") for t in by_op)
+    slow = client.get("/api/traces?q=%3E10s").json()
+    assert slow["query"]["min_ms"] == 10000 and slow["traces"] and all(t["duration_ms"] >= 10000 for t in slow["traces"])
+    fast = client.get("/api/traces?q=route%20%3C2s").json()["traces"]
+    assert fast and all(t["duration_ms"] <= 2000 for t in fast)
+    pref = client.get(f"/api/traces?q={all_[0]['id'][:8]}").json()["traces"]
+    assert pref and pref[0]["id"] == all_[0]["id"] and pref[0]["match"] == "trace id"
+    assert client.get("/api/traces?q=errors").json()["query"]["errors"] is True
+    assert client.get("/api/traces?q=nothing-like-this").json()["traces"] == []

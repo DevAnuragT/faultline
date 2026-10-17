@@ -343,13 +343,55 @@ def status(st: Store, window: str) -> dict:
     return {"window": window, "label": label, "status": st_, "baseline": base, "baseline_label": base_label, "endpoint": op, "reasons": reasons, "deltas": deltas, "slo": slo}
 
 
-def traces(st: Store, window: str, order: str = "duration", errors: bool = False, limit: int = 20) -> list[dict]:
-    """Root traces of a window: slowest first (default) or in time order, optionally only failed/erroring ones."""
+def traces(st: Store, window: str, order: str = "duration", errors: bool = False, limit: int = 20, q: str = "",
+           min_ms: float | None = None, max_ms: float | None = None) -> list[dict]:
+    """Root traces of a window: slowest first (default) or in time order; optionally only failing ones; optionally
+    matching a free-text query. `q` matches a trace id prefix, the root operation, a status code, or any service or
+    operation name that appears in the trace, so an engineer can type "route", "GetDriver", "500" or "7d2a3d38"."""
     order_by = "t.duration_ms DESC" if order == "duration" else "t.start_us"
-    _, rows = st.ro(f"""MATCH (t:Trace {{window:$w}}) WHERE NOT $errors OR t.errors > 0 OR NOT t.status STARTS WITH '2'
-                        RETURN t.id, t.root, t.duration_ms, t.status, t.errors, t.start_us ORDER BY {order_by} LIMIT $n""",
-                    {"w": window, "errors": errors, "n": int(limit)})
-    return [{"id": r[0], "root": r[1], "duration_ms": round(r[2], 1), "status": r[3], "errors": r[4], "start_us": r[5]} for r in rows]
+    q = (q or "").strip()
+    dur_filter = (" AND t.duration_ms >= $min" if min_ms is not None else "") + (" AND t.duration_ms <= $max" if max_ms is not None else "")
+    if q:  # FalkorDB has no EXISTS subquery: count matching spans per trace with an OPTIONAL MATCH instead
+        cypher = f"""MATCH (t:Trace {{window:$w}}) WHERE (NOT $errors OR t.errors > 0 OR NOT t.status STARTS WITH '2'){dur_filter}
+                     OPTIONAL MATCH (sp:Span)-[:OF]->(t) WHERE toLower(sp.service) CONTAINS toLower($q) OR toLower(sp.op) CONTAINS toLower($q)
+                     WITH t, count(sp) AS hits
+                     WHERE hits > 0 OR t.id STARTS WITH $q OR toLower(t.root) CONTAINS toLower($q) OR t.status = $q
+                     RETURN t.id, t.root, t.duration_ms, t.status, t.errors, t.start_us ORDER BY {order_by} LIMIT $n"""
+    else:
+        cypher = f"""MATCH (t:Trace {{window:$w}}) WHERE (NOT $errors OR t.errors > 0 OR NOT t.status STARTS WITH '2'){dur_filter}
+                     RETURN t.id, t.root, t.duration_ms, t.status, t.errors, t.start_us ORDER BY {order_by} LIMIT $n"""
+    _, rows = st.ro(cypher, {"w": window, "errors": errors, "n": int(limit), "q": q, "min": min_ms, "max": max_ms})
+    out = [{"id": r[0], "root": r[1], "duration_ms": round(r[2], 1), "status": r[3], "errors": r[4], "start_us": r[5]} for r in rows]
+    if q:  # say why each row matched, so the list explains itself
+        for t in out:
+            if t["id"].startswith(q):
+                t["match"] = "trace id"
+            elif q.lower() in (t["root"] or "").lower():
+                t["match"] = "root operation"
+            elif t["status"] == q:
+                t["match"] = f"status {q}"
+            else:
+                _, hit = st.ro("MATCH (sp:Span)-[:OF]->(t:Trace {id:$id}) WHERE toLower(sp.service) CONTAINS toLower($q) OR toLower(sp.op) CONTAINS toLower($q) RETURN sp.service, sp.op, count(sp) ORDER BY count(sp) DESC LIMIT 1", {"id": t["id"], "q": q})
+                t["match"] = f"{hit[0][0]} {hit[0][1]} ×{hit[0][2]}" if hit else "match"
+    return out
+
+
+def parse_trace_query(text: str) -> dict:
+    """Free text into filters: '>500ms' / '<2s' become duration bounds, 'errors'/'failed' becomes the error filter,
+    the rest is the text query. Lets one search box do everything."""
+    import re
+    q, min_ms, max_ms, errors = [], None, None, False
+    for tok in (text or "").split():
+        m = re.fullmatch(r"([<>])\s*(\d+(?:\.\d+)?)\s*(ms|s)?", tok)
+        if m:
+            v = float(m.group(2)) * (1000 if m.group(3) == "s" else 1)
+            if m.group(1) == ">": min_ms = v
+            else: max_ms = v
+        elif tok.lower() in ("errors", "error", "failed", "failing"):
+            errors = True
+        else:
+            q.append(tok)
+    return {"q": " ".join(q), "min_ms": min_ms, "max_ms": max_ms, "errors": errors}
 
 
 def findings(st: Store, window: str) -> list[dict]:
