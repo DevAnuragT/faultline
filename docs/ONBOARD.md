@@ -5,8 +5,13 @@ Faultline is not tied to the demo app. Everything it knows about a system comes 
 
 ## What you need
 
-- Traces in **Jaeger**, or anything with the Jaeger query API (`/api/services`, `/api/traces`): Grafana Tempo exposes
-  it, and the OpenTelemetry Collector can export to Jaeger from any SDK.
+- **Traces, by any of three routes.** Pick one in the profile's `traces.source`:
+  - `otlp` (the default): point your OpenTelemetry SDKs or Collector at Faultline itself. The console's API serves
+    `POST /v1/traces` (OTLP/HTTP, protobuf or JSON, gzip accepted), so `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://faultline:8600/v1/traces`
+    is the whole integration. `faultline receive --port 4318` runs just the receiver where the console is not wanted.
+    Spans are spooled under `data/otlp/` and ingested by time window.
+  - `jaeger`: an existing Jaeger (or Tempo's Jaeger-compatible query API) via `traces.jaeger_url`.
+  - `file`: an OTLP JSON export or a Jaeger JSON export, `faultline ingest --file export.json`.
 - **FalkorDB** (Docker or FalkorDB Cloud).
 - Optionally, a way for Faultline to act: a `docker-compose.yml` for the services, or `kubectl` access to a namespace.
   Without one, Faultline runs **observe-only**: findings, critical paths, remedies, incidents, code reading, PR and issue

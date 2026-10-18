@@ -13,7 +13,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="faultline")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("load"); p.add_argument("--n", type=int, default=40); p.add_argument("--parallel", type=int, default=4)
-    p = sub.add_parser("ingest"); p.add_argument("--label", default="baseline"); p.add_argument("--limit", type=int, default=200); p.add_argument("--lookback", default="1h")
+    p = sub.add_parser("ingest"); p.add_argument("--label", default="baseline"); p.add_argument("--limit", type=int, default=200); p.add_argument("--lookback", default="1h"); p.add_argument("--file", default=None, help="import an OTLP JSON or Jaeger JSON export instead of the live source")
+    p = sub.add_parser("receive", help="run only the OTLP/HTTP receiver (POST /v1/traces) on a port, spooling spans for later ingest"); p.add_argument("--port", type=int, default=4318)
     p = sub.add_parser("baseline", help="send traffic, then ingest exactly those traces as a window"); p.add_argument("--n", type=int, default=40); p.add_argument("--parallel", type=int, default=4); p.add_argument("--label", default="baseline")
     p = sub.add_parser("report"); p.add_argument("--window", default=None); p.add_argument("--json", action="store_true")
     p = sub.add_parser("blast"); p.add_argument("service"); p.add_argument("--window", default=None)
@@ -50,8 +51,14 @@ def main() -> None:
         load.run(a.n, a.parallel); time.sleep(4)
         r = ingest.ingest_window(st, a.label, start_us=start_us)
         print(f"{analysis.record_findings(st, r['window'], analysis.findings(st, r['window']))} findings recorded"); return
+    if a.cmd == "receive":
+        import uvicorn
+        from .api import app
+        print(f"OTLP/HTTP receiver on http://0.0.0.0:{a.port}/v1/traces (set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT to it); spans spool to data/otlp/")
+        uvicorn.run(app, host="0.0.0.0", port=a.port, log_level="warning"); return
     if a.cmd == "ingest":
-        r = ingest.ingest_window(st, a.label, limit=a.limit, lookback=a.lookback)
+        from . import otlp
+        r = ingest.ingest_window(st, a.label, traces=otlp.traces_from_file(a.file) if a.file else None, limit=a.limit, lookback=a.lookback)
         n = analysis.record_findings(st, r["window"], analysis.findings(st, r["window"]))
         print(f"{n} findings recorded"); return
     if a.cmd == "agent":

@@ -31,6 +31,9 @@ _dir = PATH.parent
 # --- traces
 _tr = RAW.get("traces", {})
 JAEGER_URL = os.environ.get("JAEGER_URL") or _tr.get("jaeger_url", "http://localhost:16686")
+# where traces come from: "jaeger" (query API), "otlp" (Faultline's own OTLP/HTTP endpoint, POST /v1/traces), "file" (an export)
+SOURCE = os.environ.get("TRACE_SOURCE") or _tr.get("source") or ("jaeger" if _tr.get("jaeger_url") else "otlp")
+TRACE_FILE = _tr.get("file", "")
 ROOT_SERVICES: list[str] = list(_tr.get("root_services") or [])
 EDGE_SERVICES: list[str] = list(_tr.get("edge_services") or ROOT_SERVICES)
 

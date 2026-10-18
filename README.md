@@ -91,9 +91,12 @@ Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 
 ## Use it on your own system
 
-HotROD is only the bundled example. Everything system-specific lives in one profile file: where the traces are, how to
-generate load (or not), which services Faultline may pause and through which backend (docker compose, kubernetes, or
-observe-only), which remedy classes map to which changes, and where the code lives. `faultline init` probes your Jaeger
+HotROD is only the bundled example. Traces arrive by any of three routes: **OTLP straight from your OpenTelemetry SDKs or
+Collector** (Faultline is an OTLP/HTTP endpoint: `POST /v1/traces`, protobuf or JSON), an existing Jaeger or Tempo, or an
+export file. Everything else system-specific lives in one profile file: how to generate load (or not), which services
+Faultline may pause and through which backend (docker compose, kubernetes, or observe-only), which remedy classes map to
+which changes, and where the code lives. Data stores that emit no spans of their own still appear in the graph, named by
+the address their clients dial. `faultline init` probes your Jaeger
 and your compose file and writes a starter; `docs/ONBOARD.md` walks through the six steps.
 
 ## Deploying the public site

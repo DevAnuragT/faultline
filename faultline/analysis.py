@@ -31,10 +31,10 @@ def label(o: dict) -> str:
 
 
 def service_graph(st: Store, window: str) -> list[dict]:
-    _, rows = st.ro("MATCH (a:Service)-[c:CALLS {window:$w}]->(b:Service) RETURN a.name, b.name, c.count, c.errors, c.p50_ms, c.p95_ms, c.per_trace",
+    _, rows = st.ro("MATCH (a:Service)-[c:CALLS {window:$w}]->(b:Service) RETURN a.name, b.name, c.count, c.errors, c.p50_ms, c.p95_ms, c.per_trace, c.proto, b.store",
                     {"w": window})
     return [{"from": r[0], "to": r[1], "count": r[2], "errors": r[3], "p50_ms": round(r[4], 1), "p95_ms": round(r[5], 1),
-             "per_trace": round(r[6], 1)} for r in rows]
+             "per_trace": round(r[6], 1), "proto": r[7] or "", "to_store": bool(r[8])} for r in rows]
 
 
 def single_points_of_failure(st: Store, window: str) -> list[dict]:

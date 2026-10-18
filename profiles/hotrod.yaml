@@ -3,7 +3,9 @@
 name: hotrod
 
 traces:
-  jaeger_url: http://localhost:16686   # any Jaeger query API (Tempo/Grafana with the Jaeger-compatible API works too)
+  source: jaeger                       # otlp (default; your SDKs export to http://<faultline>:8600/v1/traces) | jaeger | file
+  jaeger_url: http://localhost:16686   # for source: jaeger (Tempo's Jaeger-compatible API works too)
+  # file: exports/traces.json          # for source: file (OTLP JSON or Jaeger JSON export)
   root_services: [frontend]            # services whose spans start requests; leave empty to auto-detect from the traces
   edge_services: [frontend]            # internet-facing services, for the attack-surface view; defaults to root_services
 

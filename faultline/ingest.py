@@ -18,12 +18,26 @@ def _p(values: list[float], pct: float) -> float:
     return v[min(len(v) - 1, int(round(pct / 100 * (len(v) - 1))))]
 
 
+def _seconds(lookback: str) -> float:
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return float(lookback[:-1]) * units.get(lookback[-1], 1) if lookback and lookback[-1] in units else float(lookback or 3600)
+
+
 def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit: int = 200, lookback: str = "1h",
                   start_us: int | None = None, progress=print) -> dict:
     st.ensure_indexes()
-    traces = traces if traces is not None else jaeger.fetch_root_traces(limit=limit, lookback=lookback, start_us=start_us)
+    if traces is None:
+        from . import profile
+        if profile.SOURCE == "otlp":
+            from . import otlp
+            traces = otlp.traces(start_us=start_us, lookback_s=_seconds(lookback) if not start_us else None, limit=limit)
+        elif profile.SOURCE == "file":
+            from . import otlp
+            traces = otlp.traces_from_file(profile.TRACE_FILE)
+        else:
+            traces = jaeger.fetch_root_traces(limit=limit, lookback=lookback, start_us=start_us)
     if not traces:
-        raise RuntimeError("Jaeger returned no traces; run the load generator first")
+        raise RuntimeError("no traces in range: send traffic first, point OTLP exporters at this Faultline (/v1/traces), or widen --lookback")
     wid = f"w-{uuid.uuid4().hex[:8]}"
     starts = [min(s["start_us"] for s in t["spans"]) for t in traces]
     ends = [max(s["start_us"] + s["duration_us"] for s in t["spans"]) for t in traces]
@@ -35,6 +49,7 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
     svc_edges: dict[tuple[str, str], list[dict]] = defaultdict(list)   # (caller svc, callee svc) -> child spans
     op_edges: dict[tuple[str, str], list[dict]] = defaultdict(list)    # (caller op key, callee op key)
     ops: dict[str, tuple[str, str]] = {}
+    stores_seen: set[str] = set()
     for t in traces:
         by_id = {s["id"]: s for s in t["spans"]}
         path, self_us = critical_path(t["spans"])
@@ -65,6 +80,14 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
                 svc_edges[(p["service"], s["service"])].append(s)
             if p is not None:
                 op_edges[(f"{p['service']}::{p['op']}", key)].append(s)
+            # A client span to a data store that emits no spans of its own (the normal case outside the demo): the store
+            # becomes a Service node named by the address the client dialled, so stores show in the graph, the blast
+            # radius and the attack surface for real OpenTelemetry data too.
+            if s["kind"] == "client" and s.get("proto", "").startswith("db:") and not any(c["parent"] == s["id"] and c["service"] != s["service"] for c in t["spans"]):
+                store = s["attrs"].get("peer.service") or s["attrs"].get("server.address") or s["proto"][3:]
+                if store and store != s["service"]:
+                    svc_edges[(s["service"], store)].append(s)
+                    stores_seen.add(store)
         st.q("""MATCH (w:Window {id:$w})
                 CREATE (t:Trace {id:$id, window:$w, root:$root, root_service:$rs, duration_ms:$d, status:$status, errors:$errors,
                                  start_us:$start})-[:IN]->(w)
@@ -86,6 +109,8 @@ def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit
         return {"count": len(spans), "errors": sum(1 for s in spans if s["error"]), "p50_ms": median(d), "p95_ms": _p(d, 95),
                 "proto": max(set(protos), key=protos.count) if protos else ""}
 
+    for store in stores_seen:
+        st.q("MERGE (s:Service {name:$s}) ON CREATE SET s.store = true", {"s": store})
     for (a, b), spans in svc_edges.items():
         st.q("MATCH (a:Service {name:$a}), (b:Service {name:$b}) CREATE (a)-[:CALLS {window:$w, count:$count, errors:$errors, "
              "p50_ms:$p50_ms, p95_ms:$p95_ms, per_trace:$pt, proto:$proto}]->(b)",

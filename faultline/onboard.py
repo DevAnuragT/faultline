@@ -56,7 +56,7 @@ def write_starter(jaeger: str, compose: str, out: str) -> str:
             svc_map[s] = {"in_process_of": "<the service this runs inside, or delete this line>"} if any(k in s.lower() for k in ("mysql", "redis", "postgres", "db", "cache", "kafka")) else {}
     doc = {
         "name": Path(out).stem if Path(out).stem != "faultline" else Path.cwd().name,
-        "traces": {"jaeger_url": jaeger, "root_services": list(roots), "edge_services": list(roots)},
+        "traces": ({"source": "jaeger", "jaeger_url": jaeger} if services else {"source": "otlp"}) | {"root_services": list(roots), "edge_services": list(roots)},
         "load": {"urls": ["http://localhost:8080/<an endpoint that exercises the system>"], "requests": 40, "parallel": 4, "timeout_s": 35},
         "environment": {"backend": "compose" if compose_services else "none", "compose_file": compose},
         "services": svc_map,
@@ -71,5 +71,5 @@ def write_starter(jaeger: str, compose: str, out: str) -> str:
             "# load: delete the block to run observe-only (ingest live traffic with `faultline ingest --lookback 15m`).\n"
             + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     Path(out).write_text(text)
-    return (f"wrote {out}: {len(services)} services from Jaeger ({', '.join(services) or 'none reachable'}), roots {roots or 'none found'}, "
+    return (f"wrote {out}: " + ("no Jaeger reachable: traces.source set to otlp (export OTLP to http://<faultline>:8600/v1/traces). " if not services else "") + f"{len(services)} services from Jaeger ({', '.join(services) or 'none reachable'}), roots {roots or 'none found'}, "
             f"{len(compose_services)} compose services. Edit it, then: FAULTLINE_PROFILE={out} faultline baseline")

@@ -5,7 +5,7 @@ import json
 import threading
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -234,6 +234,40 @@ async def no_stale_static(request, call_next):
     if request.url.path in ("/", "/index.html", "/app.js", "/styles.css"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.post("/v1/traces")
+async def otlp_traces(request: Request):
+    """OTLP/HTTP traces receiver: point any OpenTelemetry SDK or Collector exporter at http://<faultline>:8600 (protobuf or JSON, gzip ok)."""
+    from . import otlp
+    body = await request.body()
+    try:
+        return otlp.receive(body, request.headers.get("content-type", ""), request.headers.get("content-encoding", ""))
+    except Exception as exc:
+        raise HTTPException(400, f"cannot decode OTLP payload: {exc.__class__.__name__}: {str(exc)[:200]}")
+
+
+@app.get("/api/otlp")
+def otlp_stats():
+    from . import otlp
+    return otlp.stats()
+
+
+class Ingest(BaseModel):
+    label: str = "baseline"
+    lookback: str = "15m"
+    limit: int = 200
+
+
+@app.post("/api/ingest")
+def ingest_now(i: Ingest):
+    """Ingest a window from the configured trace source (used by observe-only setups: no load generator)."""
+    if config.PUBLIC_MODE:
+        raise HTTPException(403, "disabled in the read-only public demo")
+    s = st()
+    r = ingest.ingest_window(s, i.label, lookback=i.lookback, limit=i.limit, progress=lambda m: None)
+    analysis.record_findings(s, r["window"], analysis.findings(s, r["window"]))
+    return r
 
 
 @app.get("/")
