@@ -2,6 +2,8 @@ services:
   - type: web
     name: faultline
     runtime: docker
+    branch: faultline
+    healthCheckPath: /api/meta
     plan: free
     envVars:
       - { key: FAULTLINE_PUBLIC, value: "true" }
@@ -13,3 +15,4 @@ services:
       - { key: FALKORDB_USERNAME, sync: false }
       - { key: FALKORDB_PASSWORD, sync: false }
       - { key: GEMINI_API_KEY, sync: false }
+      - { key: OPENROUTER_API_KEY, sync: false }
