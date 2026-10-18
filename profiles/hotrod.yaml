@@ -1,0 +1,74 @@
+# Faultline profile: how to observe and act on ONE system. This one is Jaeger's HotROD demo, the bundled example.
+# Copy it to faultline.yaml in your project (or set FAULTLINE_PROFILE) and describe your own services.
+name: hotrod
+
+traces:
+  jaeger_url: http://localhost:16686   # any Jaeger query API (Tempo/Grafana with the Jaeger-compatible API works too)
+  root_services: [frontend]            # services whose spans start requests; leave empty to auto-detect from the traces
+  edge_services: [frontend]            # internet-facing services, for the attack-surface view; defaults to root_services
+
+load:                                  # optional. Omit it to run observe-only: windows are ingested from live traffic.
+  urls:
+    - "http://localhost:8080/dispatch?customer=123"
+    - "http://localhost:8080/dispatch?customer=392"
+    - "http://localhost:8080/dispatch?customer=731"
+    - "http://localhost:8080/dispatch?customer=567"
+  requests: 40
+  parallel: 4
+  timeout_s: 35
+
+environment:                           # how Faultline can touch services. One backend per profile.
+  backend: compose                     # compose | kubernetes | none (observe-only: experiments and fixes are disabled)
+  compose_file: docker-compose.yml     # relative to the profile's directory or absolute
+  # kubernetes: {namespace: default, context: ""}
+
+services:                              # service name as it appears in traces -> how it runs
+  frontend: {compose: frontend}
+  customer: {compose: customer}
+  driver:   {compose: driver}
+  route:    {compose: route}
+  mysql:        {in_process_of: customer}   # simulated store inside the customer process: it freezes with it, it cannot be paused alone
+  redis-manual: {in_process_of: driver}
+
+actuators:                             # remedy class the graph may find -> a change THIS environment can make. Nothing else is ever applied.
+  - id: "-M"
+    kind: contention
+    service: mysql                     # the owner the remedy is about
+    target: customer                   # the service that gets changed
+    change: {args: ["-M"]}             # append to the service command (compose) | {env: {KEY: VAL}} | {replicas: N}
+    what: "disable the mutex serialising MySQL connections"
+    source: {file: services/config/config.go, symbol: MySQLMutexDisabled}
+  - id: "-W 100"
+    kind: serialized_fanout
+    service: frontend
+    target: frontend
+    change: {args: ["-W", "100"]}
+    what: "raise the worker pool the frontend uses for route calls"
+    source: {file: services/config/config.go, symbol: RouteWorkerPoolSize}
+  - id: "-D 100ms"
+    kind: per_call_cost
+    service: mysql
+    target: customer
+    change: {args: ["-D", "100ms"]}
+    what: "cut the simulated query time (stand-in for an index or a cache)"
+    source: {file: services/config/config.go, symbol: MySQLGetDelay}
+
+code:                                  # where the agent reads code from. OpenTelemetry code.* span attributes win when present.
+  source_root: ""                      # a local checkout of the services' repository, or empty
+  raw_base: https://raw.githubusercontent.com/jaegertracing/jaeger/main/examples/hotrod/
+  repo_url: https://github.com/jaegertracing/jaeger/blob/main/examples/hotrod
+  map:                                 # only needed when the instrumentation emits no code attributes
+    - {service: mysql, op: "SQL SELECT", file: services/customer/database.go, function: database.Get, why: "simulated MySQL: a mutex serialises connections and a fixed query delay (-M, -D)"}
+    - {service: customer, op: "GET /customer", file: services/customer/server.go, function: Server.customer, why: "HTTP handler calling the database"}
+    - {service: redis-manual, op: FindDriverIDs, file: services/driver/redis.go, function: Redis.FindDriverIDs, why: "simulated Redis scan"}
+    - {service: redis-manual, op: GetDriver, file: services/driver/redis.go, function: Redis.GetDriver, why: "simulated Redis GET with random timeouts; called once per driver, retried on error"}
+    - {service: driver, op: driver.DriverService/FindNearest, file: services/driver/server.go, function: Server.FindNearest, why: "gRPC handler: N+1 loop over driver ids with retry on Redis errors"}
+    - {service: route, op: "GET /route", file: services/route/server.go, function: Server.route, why: "CPU-bound route computation per call"}
+    - {service: frontend, op: "HTTP GET", file: services/frontend/best_eta.go, function: bestETA.getRoutes, why: "fans out one route call per driver through a worker pool (-W); the HTTP client has no short timeout"}
+    - {service: frontend, op: "GET /dispatch", file: services/frontend/server.go, function: Server.dispatch, why: "entry point"}
+    - {service: frontend, op: driver.DriverService/FindNearest, file: services/frontend/best_eta.go, function: bestETA.Get, why: "the dispatch flow: customer, then drivers over gRPC, then routes"}
+
+slo:                                   # optional: lets the console say "within SLO" instead of only "within baseline"
+  endpoint: "GET /dispatch"
+  p95_ms: null
+  fail_rate: null

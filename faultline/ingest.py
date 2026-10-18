@@ -21,7 +21,7 @@ def _p(values: list[float], pct: float) -> float:
 def ingest_window(st: Store, label: str, traces: list[dict] | None = None, limit: int = 200, lookback: str = "1h",
                   start_us: int | None = None, progress=print) -> dict:
     st.ensure_indexes()
-    traces = traces if traces is not None else jaeger.fetch_traces(config.ROOT_SERVICE, limit=limit, lookback=lookback, start_us=start_us)
+    traces = traces if traces is not None else jaeger.fetch_root_traces(limit=limit, lookback=lookback, start_us=start_us)
     if not traces:
         raise RuntimeError("Jaeger returned no traces; run the load generator first")
     wid = f"w-{uuid.uuid4().hex[:8]}"

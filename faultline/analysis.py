@@ -128,7 +128,7 @@ def exposure(st: Store, window: str) -> list[dict]:
     """Security view of the same graph: every data store, the shortest call path from an edge service into it, the
     protocol of each hop as recorded in the spans, and the amplification on the last hop. Facts only: a hop is 'http'
     or 'grpc' as instrumented; whether it is encrypted is not in the traces, so it is reported as 'no TLS attribute'."""
-    from . import config
+    from . import profile
     _, rows = st.ro("""
         MATCH (edge:Service) WHERE edge.name IN $edges
         MATCH (store:Service)<-[c:CALLS {window:$w}]-() WHERE c.proto STARTS WITH 'db:'
@@ -137,7 +137,7 @@ def exposure(st: Store, window: str) -> list[dict]:
         WITH edge, store, p ORDER BY length(p)
         WITH edge, store, collect(p)[0] AS p
         RETURN edge.name, store.name, [n IN nodes(p) | n.name], [r IN relationships(p) | r.proto], [r IN relationships(p) | r.per_trace]""",
-        {"edges": config.EDGE_SERVICES, "w": window})
+        {"edges": profile.EDGE_SERVICES, "w": window})
     out = []
     for edge, store, nodes, protos, fan in rows:
         last = protos[-1] if protos else ""

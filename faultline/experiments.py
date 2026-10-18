@@ -1,4 +1,4 @@
-"""Act on the graph: fault experiments (pause a service) and fixes (restart a service with HotROD's fix flags).
+"""Act on the graph: fault experiments (pause a service) and fixes (apply an actuator the profile declares).
 
 Every experiment follows the chaos-engineering loop with the hypothesis computed from the graph:
   predict (blast radius from CALLS reachability) -> act (docker compose) -> observe (new Window) -> compare -> record.
@@ -14,28 +14,60 @@ import yaml
 from . import analysis, config, ingest, load
 from .graph import Store
 
-COMPOSE = config.ROOT / "docker-compose.yml"
-OVERRIDE = config.ROOT / "docker-compose.fix.yml"
-SERVICES = {"frontend", "customer", "driver", "route"}
-FIX_FLAGS = {  # the knobs HotROD exposes, and the service each one lives in; the agent chooses among these, never free text
-    "-M": ("customer", "disable the mutex serialising MySQL connections (lets customer queries run in parallel)"),
-    "-D": ("customer", "MySQL query delay, e.g. -D 100ms (default 300ms)"),
-    "-W": ("frontend", "size of the worker pool the frontend uses to call route, e.g. -W 100 (default 3)"),
-}
-OWNER_OF = {"mysql": "customer", "redis-manual": "driver"}  # in-process simulations live inside these containers
-# Actuators: how a remedy class the graph identified can be applied in THIS environment. The graph never chooses a flag;
-# it names the remedy (contention, serialized fan-out, per-call cost) and the environment maps it to a change it can make.
-# In production this table is the team's own: a feature flag, a Helm value, a pool size, a config map.
-ACTUATORS = {
-    ("contention", "mysql"): {"flags": ["-M"], "service": "customer", "what": "disable the mutex serialising MySQL connections"},
-    ("serialized_fanout", "frontend"): {"flags": ["-W", "100"], "service": "frontend", "what": "raise the worker pool the frontend uses for route calls"},
-    ("per_call_cost", "mysql"): {"flags": ["-D", "100ms"], "service": "customer", "what": "cut the simulated query time (stand-in for an index or a cache)"},
-}
+from . import profile
+
+COMPOSE = profile.COMPOSE_FILE
+OVERRIDE = profile.OVERRIDE_FILE
+SERVICES = set(profile.PAUSABLE)                       # services Faultline may pause (declared in the profile)
+OWNER_OF = profile.IN_PROCESS_OF                       # in-process stores -> the service they live in
+# Actuators come from the profile: a remedy class the graph may find -> a change THIS environment can make.
+# FIX_FLAGS keeps the historical shape {first token of actuator id: (target service, what)}; ACTUATORS is keyed by (kind, service).
+FIX_FLAGS = {a["id"].split()[0]: (a["target"], a["what"]) for a in profile.ACTUATORS}
+ACTUATORS = {(a["kind"], a["service"]): {"flags": a["id"].split(), "service": a["target"], "what": a["what"]} for a in profile.ACTUATORS}
+
+
+def actuator(flags: list[str]) -> dict | None:
+    """Resolve an actuator by its id ("-W 100") or by its first token ("-W")."""
+    key = " ".join(flags)
+    if key in profile.ACTUATOR_BY_ID:
+        return profile.ACTUATOR_BY_ID[key]
+    return next((a for a in profile.ACTUATORS if a["id"].split()[0] == flags[0]), None)
+
+
+def _k8s(*args: str, check: bool = True) -> str:
+    ns = profile.K8S.get("namespace"); ctx = profile.K8S.get("context")
+    cmd = ["kubectl"] + (["-n", ns] if ns else []) + (["--context", ctx] if ctx else []) + list(args)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(f"{' '.join(cmd)} failed: {r.stderr.strip()[-300:]}")
+    return r.stdout
+
+
+_replicas: dict[str, str] = {}
+
+
+def pause(service: str) -> None:
+    name = profile.runtime_name(service)
+    if profile.BACKEND == "compose":
+        _compose("pause", name)
+    elif profile.BACKEND == "kubernetes":
+        _replicas[service] = _k8s("get", f"deploy/{name}", "-o", "jsonpath={.spec.replicas}").strip() or "1"
+        _k8s("scale", f"deploy/{name}", "--replicas=0")
+    else:
+        raise RuntimeError("this profile is observe-only (environment.backend: none): experiments are disabled")
+
+
+def unpause(service: str) -> None:
+    name = profile.runtime_name(service)
+    if profile.BACKEND == "compose":
+        _compose("unpause", name)
+    elif profile.BACKEND == "kubernetes":
+        _k8s("scale", f"deploy/{name}", f"--replicas={_replicas.get(service, '1')}")
 
 
 def _compose(*args: str, check: bool = True) -> str:
     files = ["-f", str(COMPOSE)] + (["-f", str(OVERRIDE)] if OVERRIDE.exists() else [])
-    r = subprocess.run(["docker", "compose", *files, *args], capture_output=True, text=True, cwd=config.ROOT)
+    r = subprocess.run(["docker", "compose", *files, *args], capture_output=True, text=True, cwd=COMPOSE.parent)
     if check and r.returncode:
         raise RuntimeError(f"docker compose {' '.join(args)} failed: {r.stderr.strip()[-400:]}")
     return r.stdout
@@ -73,9 +105,9 @@ def hypothesis(st: Store, window: str, service: str) -> dict:
     calls = _calls_per_trace(st, window)
     t0 = order.get(service, 0.0)
     from . import config
-    keep = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t < t0 and calls.get(s, {}).get("calls_per_trace", 0) > 0)
+    keep = sorted(s for s, t in order.items() if s != service and s not in profile.EDGE_SERVICES and t < t0 and calls.get(s, {}).get("calls_per_trace", 0) > 0)
     frozen = sorted(s for s, owner in OWNER_OF.items() if owner == service and calls.get(s, {}).get("calls_per_trace", 0) > 0)
-    starved = sorted(s for s, t in order.items() if s != service and s not in config.EDGE_SERVICES and t >= t0 and s not in br["dependent_services"]
+    starved = sorted(s for s, t in order.items() if s != service and s not in profile.EDGE_SERVICES and t >= t0 and s not in br["dependent_services"]
                      and s not in frozen and calls.get(s, {}).get("calls_per_trace", 0) > 0)
     text = (f"If {service} stops, {', '.join(p['op'] for p in predicted) or 'nothing recorded'} fail(s) "
             f"({', '.join(br['dependent_services'])} depend on it); "
@@ -90,18 +122,18 @@ def hypothesis(st: Store, window: str, service: str) -> dict:
 def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, parallel: int = 3, progress=print) -> dict:
     """Pause one container, send traffic, unpause, ingest what happened, and compare with the graph's prediction."""
     if service not in SERVICES:
-        raise ValueError(f"unknown service {service}; one of {sorted(SERVICES)}")
+        raise ValueError(f"unknown service {service}; the profile allows pausing {sorted(SERVICES)}")
     hyp = hypothesis(st, baseline, service)
     progress(f"hypothesis: {hyp['text']}")
     exp_id = f"exp-{uuid.uuid4().hex[:8]}"
     start_us = int(time.time() * 1_000_000)
-    _compose("pause", service)
+    pause(service)
     progress(f"paused {service}; sending {requests_n} requests ({parallel} in parallel)")
     try:
         observed_load = load.run(requests_n, parallel, progress=progress)
     finally:
         load_end_us = int(time.time() * 1_000_000)  # every request has been sent and has given up by now
-        _compose("unpause", service)
+        unpause(service)
         progress(f"unpaused {service}")
     time.sleep(4)  # let the SDK flush spans to Jaeger
     w = ingest.ingest_window(st, f"pause-{service}", start_us=start_us, progress=progress)["window"]
@@ -156,54 +188,88 @@ def run_pause(st: Store, baseline: str, service: str, requests_n: int = 6, paral
     return result
 
 
-def _write_override(service: str, flags: list[str]) -> list[str]:
-    """Accumulate fixes: the override file is the current state of the stack, one service at a time."""
-    base = yaml.safe_load(COMPOSE.read_text())
-    over = yaml.safe_load(OVERRIDE.read_text()) if OVERRIDE.exists() else {"services": {}}
-    current = over["services"].get(service, {}).get("command") or list(base["services"][service]["command"])
-    cmd = list(current) + flags
-    over["services"][service] = {"command": cmd}
-    OVERRIDE.write_text(yaml.safe_dump(over))
-    return cmd
+def _apply_change(service: str, change: dict) -> str:
+    """Apply an actuator's change to a service. compose: args appended to the command or env set, through an override file
+    that is the current state of the stack; kubernetes: env on the deployment. Returns a description of what runs now."""
+    name = profile.runtime_name(service)
+    if profile.BACKEND == "compose":
+        base = yaml.safe_load(COMPOSE.read_text())
+        over = yaml.safe_load(OVERRIDE.read_text()) if OVERRIDE.exists() else {"services": {}}
+        svc = over["services"].setdefault(name, {})
+        if change.get("args"):
+            cmd = list(svc.get("command") or base["services"][name].get("command") or [])
+            svc["command"] = cmd + list(change["args"])
+        if change.get("env"):
+            env = dict(svc.get("environment") or {}); env.update({k: str(v) for k, v in change["env"].items()}); svc["environment"] = env
+        OVERRIDE.write_text(yaml.safe_dump(over))
+        _compose("up", "-d", "--no-deps", "--force-recreate", name)
+        return " ".join(svc.get("command") or []) + (f" env {svc.get('environment')}" if svc.get("environment") else "")
+    if profile.BACKEND == "kubernetes":
+        if change.get("args"):
+            raise RuntimeError("args changes need a compose backend; on kubernetes declare the change as env or replicas")
+        if change.get("env"):
+            _k8s("set", "env", f"deploy/{name}", *[f"{k}={v}" for k, v in change["env"].items()])
+        if change.get("replicas"):
+            _k8s("scale", f"deploy/{name}", f"--replicas={change['replicas']}")
+        _k8s("rollout", "status", f"deploy/{name}", "--timeout=120s", check=False)
+        return str(change)
+    raise RuntimeError("this profile is observe-only (environment.backend: none): fixes are disabled")
+
+
+def _remove_change(service: str, change: dict) -> None:
+    name = profile.runtime_name(service)
+    if profile.BACKEND == "compose":
+        over = yaml.safe_load(OVERRIDE.read_text()) if OVERRIDE.exists() else {"services": {}}
+        svc = over["services"].get(name, {})
+        if change.get("args") and svc.get("command"):
+            cmd, args = svc["command"], list(change["args"]); n = len(args)
+            for i in range(len(cmd) - n, -1, -1):
+                if cmd[i:i + n] == args:
+                    del cmd[i:i + n]; break
+        if change.get("env") and svc.get("environment"):
+            for k in change["env"]:
+                svc["environment"].pop(k, None)
+        OVERRIDE.write_text(yaml.safe_dump(over))
+        _compose("up", "-d", "--no-deps", "--force-recreate", name, check=False)
+    elif profile.BACKEND == "kubernetes":
+        if change.get("env"):
+            _k8s("set", "env", f"deploy/{name}", *[f"{k}-" for k in change["env"]], check=False)
+        if change.get("replicas"):
+            _k8s("scale", f"deploy/{name}", f"--replicas={_replicas.get(service, '1')}", check=False)
+
+
+def _write_override(service: str, flags: list[str]) -> list[str]:  # kept for callers that think in flags
+    _apply_change(service, {"args": flags}); return flags
 
 
 def _remove_override(service: str, flags: list[str]) -> None:
-    over = yaml.safe_load(OVERRIDE.read_text()) if OVERRIDE.exists() else {"services": {}}
-    cmd = over["services"].get(service, {}).get("command")
-    if not cmd:
-        return
-    n = len(flags)
-    for i in range(len(cmd) - n, -1, -1):
-        if cmd[i:i + n] == flags:
-            del cmd[i:i + n]
-            break
-    over["services"][service] = {"command": cmd}
-    OVERRIDE.write_text(yaml.safe_dump(over))
+    _remove_change(service, {"args": flags})
 
 
 def run_fix(st: Store, baseline: str, flags: list[str], rationale: str = "", requests_n: int = 40, parallel: int = 4,
             min_gain_pct: float = 20.0, progress=print) -> dict:
-    """Apply one HotROD fix flag to the service it belongs to, re-measure, and accept only if the graph shows the gain
-    where it was claimed (the target's critical-path time drops), the endpoint is faster, and nothing got worse."""
-    if not flags or flags[0] not in FIX_FLAGS:
-        raise ValueError(f"flags must start with one of {sorted(FIX_FLAGS)}")
-    service = FIX_FLAGS[flags[0]][0]
+    """Apply one actuator from the profile (by id, e.g. "-M" or "-W 100") to its target service, re-measure, and accept only
+    if the graph shows the gain where it was claimed (the target's critical-path time drops), the endpoint is faster, and
+    nothing got worse."""
+    act = actuator(flags) if flags else None
+    if not act:
+        raise ValueError(f"unknown actuator {' '.join(flags)!r}; the profile declares {sorted(profile.ACTUATOR_BY_ID)}")
+    flags = act["id"].split()
+    service = act["target"]
     fix_id = f"fix-{uuid.uuid4().hex[:8]}"
     before_health = {h["op"]: h for h in analysis.root_health(st, baseline)}
     before_owners = analysis.critical_owners(st, baseline)
-    cmd = _write_override(service, flags)
     try:
-        _compose("up", "-d", "--no-deps", "--force-recreate", service)
-        progress(f"restarted {service} as: {' '.join(cmd)}; warming up")
+        now = _apply_change(service, act["change"])
+        progress(f"applied {act['id']} to {service}: {now}; warming up")
         time.sleep(5)
         start_us = int(time.time() * 1_000_000)
         load.run(requests_n, parallel, progress=progress)
         time.sleep(4)
         w = ingest.ingest_window(st, f"fix-{service}", start_us=start_us, progress=progress)["window"]
     except BaseException:  # anything going wrong between restart and measurement must not leave the change in place
-        _remove_override(service, flags)
-        _compose("up", "-d", "--no-deps", "--force-recreate", service, check=False)
-        progress(f"rolled back after an error: {service} restarted without {' '.join(flags)}")
+        _remove_change(service, act["change"])
+        progress(f"rolled back after an error: {service} restored without {act['id']}")
         raise
     after_health = {h["op"]: h for h in analysis.root_health(st, w, baseline_p50={op: h["p50_ms"] for op, h in before_health.items()})}
     after_owners = analysis.critical_owners(st, w)
@@ -229,13 +295,12 @@ def run_fix(st: Store, baseline: str, flags: list[str], rationale: str = "", req
                   "detail": f"{ob:.0f} -> {oa:.0f} ms per request on the critical path"})
     verdict = "VERIFIED" if all(g["passed"] for g in gates) else "REJECTED"
     if verdict == "REJECTED":  # closed loop: a rejected change does not stay in the system, and its window is not steady state
-        _remove_override(service, flags)
-        _compose("up", "-d", "--no-deps", "--force-recreate", service)
+        _remove_change(service, act["change"])
         st.q("MATCH (x:Window {id:$w}) SET x.steady = false", {"w": w})
-        progress(f"rolled back: {service} restarted without {' '.join(flags)}")
+        progress(f"rolled back: {service} restored without {act['id']}")
     nxt = after_owners[0] if after_owners else None
     next_owner = f"{analysis.label(nxt)} now owns {nxt['share_pct']}% ({nxt['per_request_ms']:.0f} ms/request)" if nxt else ""
-    result = {"id": fix_id, "service": service, "flags": flags, "command": cmd, "rationale": rationale, "before": baseline, "after": w,
+    result = {"id": fix_id, "service": service, "flags": flags, "command": now, "rationale": rationale, "before": baseline, "after": w,
               "gates": gates, "verdict": verdict, "rolled_back": verdict == "REJECTED", "owners_before": before_owners[:5], "owners_after": after_owners[:5], "next_owner": next_owner}
     st.q("""MATCH (b:Window {id:$b}), (a:Window {id:$a}), (s:Service {name:$svc})
             CREATE (f:Fix {id:$id, service:$svc, flags:$flags, rationale:$r, verdict:$v, gates:$gates, next_owner:$nxt, ts:$ts})
@@ -250,7 +315,10 @@ def run_fix(st: Store, baseline: str, flags: list[str], rationale: str = "", req
 
 
 def revert_fixes(progress=print) -> None:
-    if OVERRIDE.exists():
-        OVERRIDE.unlink()
-    _compose("up", "-d", "--force-recreate", *sorted(SERVICES))
-    progress("all services back to stock flags")
+    if profile.BACKEND == "compose":
+        if OVERRIDE.exists():
+            OVERRIDE.unlink()
+        _compose("up", "-d", "--force-recreate", *sorted(profile.runtime_name(s) for s in SERVICES))
+        progress("all services back to their stock configuration")
+    else:
+        progress("revert is only automatic on the compose backend; undo kubernetes changes with the actuator ids you applied")

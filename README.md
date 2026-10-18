@@ -89,6 +89,13 @@ Measured on Oct 16 (see `docs/ANALYSIS.md` for the research):
 - Fix `-W 100` (frontend): p50 788 → 593 ms, VERIFIED; route's queueing time on the critical path gone.
 
 
+## Use it on your own system
+
+HotROD is only the bundled example. Everything system-specific lives in one profile file: where the traces are, how to
+generate load (or not), which services Faultline may pause and through which backend (docker compose, kubernetes, or
+observe-only), which remedy classes map to which changes, and where the code lives. `faultline init` probes your Jaeger
+and your compose file and writes a starter; `docs/ONBOARD.md` walks through the six steps.
+
 ## Deploying the public site
 
 Read-only mode: `FAULTLINE_PUBLIC=true`. Proposals and approvals refuse in the backend (`faultline/guard.py`, tested in

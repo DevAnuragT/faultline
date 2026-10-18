@@ -95,7 +95,7 @@ def propose_experiment(service: str, rationale: str = "") -> dict:
 
 @mcp.tool()
 def propose_fix(flags: str, rationale: str = "") -> dict:
-    """Propose (not apply) a HotROD fix flag; a human approves in the UI/CLI."""
+    """Propose (not apply) an actuator from the profile (id from next_fix); a human approves in the UI/CLI."""
     return box().propose_fix(flags, rationale)
 
 

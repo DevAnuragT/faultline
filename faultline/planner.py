@@ -12,7 +12,9 @@ import time
 from . import analysis
 from .graph import Store
 
-PAUSABLE = ("frontend", "customer", "driver", "route")
+from . import profile
+
+PAUSABLE = tuple(profile.PAUSABLE)
 RECENT_S = 15 * 60
 
 
@@ -55,8 +57,7 @@ def rank_experiments(st: Store, window: str) -> list[dict]:
 
 
 def st_edge_services() -> set[str]:
-    from . import config
-    return set(config.EDGE_SERVICES)
+    return set(profile.EDGE_SERVICES)
 
 
 def remedies(st: Store, window: str) -> list[dict]:

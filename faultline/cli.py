@@ -23,10 +23,22 @@ def main() -> None:
     p = sub.add_parser("actions"); p.add_argument("--status", default=None)
     p = sub.add_parser("approve"); p.add_argument("action_id")
     p = sub.add_parser("reject"); p.add_argument("action_id"); p.add_argument("--why", default="")
-    sub.add_parser("record-agent", help="record the public site's agent conversation with live Gemini")
+    sub.add_parser("record-agent", help="record the public site's agent conversation with the live model")
+    p = sub.add_parser("init", help="write a starter faultline.yaml for YOUR system by probing Jaeger and docker compose"); p.add_argument("--jaeger", default="http://localhost:16686"); p.add_argument("--compose", default="docker-compose.yml"); p.add_argument("--out", default="faultline.yaml")
+    sub.add_parser("profile", help="show the active profile: services, backend, actuators, code sources")
     sub.add_parser("revert")
     sub.add_parser("reset")
     a = ap.parse_args()
+    if a.cmd == "init":
+        from . import onboard
+        print(onboard.write_starter(a.jaeger, a.compose, a.out)); return
+    if a.cmd == "profile":
+        from . import profile
+        print(f"profile {profile.NAME} ({profile.PATH})\n backend {profile.BACKEND}; roots {profile.ROOT_SERVICES or 'auto'}; edge {profile.EDGE_SERVICES}")
+        print(f" load: {len(profile.LOAD_URLS)} urls" if profile.LOAD_URLS else " load: none (observe-only ingest from live traffic)")
+        print(f" pausable: {profile.PAUSABLE}; in-process: {profile.IN_PROCESS_OF}")
+        for x in profile.ACTUATORS: print(f" actuator {x['id']!r}: {x['kind']} in {x['service']} -> {x['target']} {x['change']}")
+        print(f" code: source_root={profile.SOURCE_ROOT or '-'} raw_base={profile.RAW_BASE or '-'} map={len(profile.CODE_MAP)} entries"); return
     if a.cmd == "load":
         load.run(a.n, a.parallel); return
     st = Store()

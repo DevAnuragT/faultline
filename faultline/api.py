@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import actions, analysis, config, experiments, frozen, ingest, planner
+from . import actions, analysis, config, experiments, frozen, ingest, planner, profile
 from .agent import Agent, Toolbox
 from .graph import Store
 
@@ -35,8 +35,10 @@ def _w(window: str | None) -> str:
 @app.get("/api/meta")
 def meta():
     return {"public": config.PUBLIC_MODE, "graph": config.GRAPH_NAME, "model": Agent(st()).model or "offline",
-            "edge": config.EDGE_SERVICES, "recorded": frozen.load_agent() is not None,
-            "slo": {"endpoint": f"GET /dispatch", "p95_ms": config.SLO_P95_MS, "fail_rate": config.SLO_FAIL_RATE} if (config.SLO_P95_MS or config.SLO_FAIL_RATE) else None}
+            "edge": profile.EDGE_SERVICES, "recorded": frozen.load_agent() is not None, "profile": profile.NAME, "backend": profile.BACKEND,
+            "observe_only": profile.BACKEND == "none", "load": bool(profile.LOAD_URLS),
+            "slo": {"endpoint": profile.SLO.get("endpoint"), "p95_ms": profile.SLO.get("p95_ms") or config.SLO_P95_MS, "fail_rate": profile.SLO.get("fail_rate") or config.SLO_FAIL_RATE}
+                   if (profile.SLO.get("p95_ms") or profile.SLO.get("fail_rate") or config.SLO_P95_MS or config.SLO_FAIL_RATE) else None}
 
 
 @app.get("/api/windows")

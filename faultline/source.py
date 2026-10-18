@@ -12,8 +12,10 @@ from pathlib import Path
 
 from . import code as codemap, config
 
-SOURCE_ROOT = os.environ.get("SOURCE_ROOT", "")
-RAW_BASE = os.environ.get("SOURCE_RAW_BASE", "https://raw.githubusercontent.com/jaegertracing/jaeger/main/examples/hotrod/")
+from . import profile
+
+SOURCE_ROOT = profile.SOURCE_ROOT
+RAW_BASE = profile.RAW_BASE
 CACHE = config.ROOT / "data" / "cache" / "source"
 
 
@@ -25,6 +27,8 @@ def fetch_file(path: str) -> str:
     cached = CACHE / path
     if cached.exists():
         return cached.read_text()
+    if not RAW_BASE:
+        raise FileNotFoundError(f"{path}: set code.source_root (a local checkout) or code.raw_base in the profile")
     with urllib.request.urlopen(RAW_BASE + path, timeout=20) as r:
         text = r.read().decode()
     cached.parent.mkdir(parents=True, exist_ok=True)
@@ -32,17 +36,43 @@ def fetch_file(path: str) -> str:
     return text
 
 
-def extract_function(text: str, function: str) -> dict | None:
-    """Go: `func (recv *Type) Name(` or `func Name(`; the body ends at the first line that is just `}`."""
+def extract_function(text: str, function: str, path: str = "") -> dict | None:
+    """Find a function by name in Go, Python, JavaScript/TypeScript, Java, Kotlin, C# or Rust source and return its body.
+    `function` may be `Type.name` or `name`. Heuristic, not a parser: good enough to quote the right lines."""
     typ, _, name = function.rpartition(".")
-    pat = (re.compile(r"^func \(\w+ \*?%s\) %s\(" % (re.escape(typ), re.escape(name)), re.M) if typ
-           else re.compile(r"^func %s\(" % re.escape(name), re.M))
-    m = pat.search(text)
-    if not m:
-        return None
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else "go"
     lines = text.splitlines()
-    start = text[:m.start()].count("\n")
-    end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), len(lines) - 1)
+    if ext == "py":
+        pat = re.compile(r"^([ \t]*)(?:async[ \t]+)?def[ \t]+%s[ \t]*\(" % re.escape(name), re.M)
+        m = pat.search(text)
+        if not m:
+            return None
+        start = text[:m.start()].count("\n"); indent = len(m.group(1))
+        end = start
+        for i in range(start + 1, len(lines)):
+            l = lines[i]
+            if l.strip() and (len(l) - len(l.lstrip())) <= indent and not l.lstrip().startswith(("#", "@")):
+                break
+            if l.strip():
+                end = i
+    else:
+        if ext == "go":
+            pat = (re.compile(r"^func \(\w+ \*?%s\) %s\(" % (re.escape(typ), re.escape(name)), re.M) if typ
+                   else re.compile(r"^func %s\(" % re.escape(name), re.M))
+        else:  # brace languages: `name(` at a declaration-ish position, not a call inside an expression
+            pat = re.compile(r"^[ \t]*(?:[\w<>\[\],?.]+[ \t]+)*(?:function[ \t]+)?%s[ \t]*\([^;{]*\)[^;{]*\{" % re.escape(name), re.M)
+        m = pat.search(text)
+        if not m:
+            return None
+        start = text[:m.start()].count("\n")
+        if ext == "go":
+            end = next((i for i in range(start + 1, len(lines)) if lines[i] == "}"), len(lines) - 1)
+        else:
+            depth, end = 0, start
+            for i in range(start, len(lines)):
+                depth += lines[i].count("{") - lines[i].count("}")
+                if depth <= 0 and i > start or (depth == 0 and "{" in lines[i] and "}" in lines[i] and i == start):
+                    end = i; break
     body = "\n".join(lines[start:end + 1])
     return {"start_line": start + 1, "end_line": end + 1, "code": body, "sha": hashlib.sha256(body.encode()).hexdigest()[:16]}
 
@@ -60,7 +90,7 @@ def read(service: str, op: str, span_code: str = "") -> dict:
             text = fetch_file(path)
         except Exception as exc:
             return {"error": f"cannot read {path}: {exc.__class__.__name__}", "pointer": ptr}
-        found = extract_function(text, fn) if fn else None
+        found = extract_function(text, fn, path) if fn else None
         if not found and line:
             lines = text.splitlines(); i = max(int(line) - 1, 0)
             body = "\n".join(lines[max(0, i - 10):i + 20]); found = {"start_line": max(0, i - 10) + 1, "end_line": i + 20, "code": body, "sha": hashlib.sha256(body.encode()).hexdigest()[:16]}
@@ -69,10 +99,11 @@ def read(service: str, op: str, span_code: str = "") -> dict:
         text = fetch_file(ptr["file"])
     except Exception as exc:
         return {"error": f"cannot read {ptr['file']}: {exc.__class__.__name__}", "pointer": ptr}
-    found = extract_function(text, ptr["function"])
+    found = extract_function(text, ptr["function"], ptr["file"])
     if not found:
         return {"error": f"{ptr['function']} not found in {ptr['file']}", "pointer": ptr}
-    return {"file": ptr["file"], "function": ptr["function"], "why": ptr["why"], "url": f"{ptr['url']}#L{found['start_line']}-L{found['end_line']}", "source": ptr["source"], **found}
+    url = f"{ptr['url']}#L{found['start_line']}-L{found['end_line']}" if ptr.get("url") else ""
+    return {"file": ptr["file"], "function": ptr["function"], "why": ptr["why"], "url": url, "source": ptr["source"], **found}
 
 
 def check_patch(patch: str, code: str) -> list[str]:

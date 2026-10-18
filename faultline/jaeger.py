@@ -5,7 +5,7 @@ import time
 
 import requests
 
-from . import config
+from . import profile
 
 
 def fetch_traces(service: str, limit: int = 200, lookback: str = "1h", start_us: int | None = None) -> list[dict]:
@@ -15,9 +15,26 @@ def fetch_traces(service: str, limit: int = 200, lookback: str = "1h", start_us:
         params.update(start=int(start_us), end=int(time.time() * 1_000_000))
     else:
         params["lookback"] = lookback
-    r = requests.get(f"{config.JAEGER_URL}/api/traces", params=params, timeout=30)
+    r = requests.get(f"{profile.JAEGER_URL}/api/traces", params=params, timeout=30)
     r.raise_for_status()
     return [normalise(t) for t in r.json()["data"]]
+
+
+def list_services() -> list[str]:
+    r = requests.get(f"{profile.JAEGER_URL}/api/services", timeout=30)
+    r.raise_for_status()
+    return [s for s in (r.json().get("data") or []) if s != "jaeger-all-in-one"]
+
+
+def fetch_root_traces(limit: int = 200, lookback: str = "1h", start_us: int | None = None) -> list[dict]:
+    """Traces for every root service the profile names, or for every service Jaeger knows when it names none; de-duplicated."""
+    roots = profile.ROOT_SERVICES or list_services()
+    seen, out = set(), []
+    for svc in roots:
+        for t in fetch_traces(svc, limit=limit, lookback=lookback, start_us=start_us):
+            if t["id"] not in seen:
+                seen.add(t["id"]); out.append(t)
+    return out
 
 
 def _tags(span: dict) -> dict:

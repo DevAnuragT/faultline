@@ -154,8 +154,8 @@ class Toolbox:
         return res
 
     def propose_fix(self, flags: str, rationale: str = "") -> dict:
-        """Propose (not apply) a HotROD fix: flags is one of "-M", "-D 100ms", "-W 100". A human must approve; the fix is
-        then applied, re-measured and judged by four gates."""
+        """Propose (not apply) a fix: `flags` is an actuator id from next_fix or remedies (the profile declares which
+        changes this environment can make). A human must approve; the fix is then applied, re-measured and judged by four gates."""
         res = actions.propose_fix(self.st, flags.split(), rationale)
         self._log("propose_fix", {"flags": flags}, res)
         return res
