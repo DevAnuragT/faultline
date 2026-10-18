@@ -5,7 +5,7 @@ break, what to fix, and how to prove it.**
 
 Built Oct 16–18, 2026 for the WeMakeDevs × FalkorDB hackathon (Track 1: Agents That Act on Connected Data).
 Research, prior art and the graph model: [docs/ANALYSIS.md](docs/ANALYSIS.md) · story: [docs/PROJECT_STORY.md](docs/PROJECT_STORY.md) ·
-demo script: [docs/DEMO.md](docs/DEMO.md) · **Live site:** _coming before submission_ · **Video:** _coming before submission_
+demo script: [docs/DEMO.md](docs/DEMO.md) · **Video:** [docs/video/faultline-demo.mp4](docs/video/faultline-demo.mp4) (3:43, narrated) · **Blog:** [Faultline: letting the trace graph decide](https://gist.github.com/DevAnuragT/27695e0c21d290bc16d4f75ee0ea8e11) · **Live site:** read-only deployment via `render.yaml`; local setup below is complete
 
 ## See it in 30 seconds
 
