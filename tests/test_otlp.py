@@ -71,7 +71,7 @@ def test_receiver_accepts_json_and_gzip_and_ingests_a_window(st, tmp_path, monke
     assert ex and ex[0]["store"] == "postgres" and ex[0]["path"] == "gateway -> orders -> postgres"
     assert any(o["service"] == "orders" and o["code"] and "orders/handlers.py" in o["code"]["location"] for o in owners)
     ret = analysis.retries(st, w)
-    assert ret and ret[0]["service"] == "postgres" and ret[0]["retried_errors"] == 6
+    assert ret and ret[0]["service"] == "orders" and ret[0]["op"] == "INSERT orders" and ret[0]["retried_errors"] == 6
     health = analysis.root_health(st, w)[0]
     assert health["op"] == "POST /orders" and health["service"] == "gateway" and health["traces"] == 6
 
