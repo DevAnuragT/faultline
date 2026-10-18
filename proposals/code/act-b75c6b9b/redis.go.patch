@@ -1,0 +1,6 @@
+--- services/driver/redis.go
++++ services/driver/redis.go
+@@ -75,3 +75,2 @@
+-	// simulate RPC delay
+-	delay.Sleep(config.RedisGetDelay, config.RedisGetDelayStdDev)
++	// RPC delay removed to reduce per-call latency
