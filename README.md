@@ -35,7 +35,7 @@ Prerequisites: Docker with Compose, Python 3.12, free ports 6379 (FalkorDB), 300
 16686 (Jaeger) and 8600 (the console). Change the FalkorDB host ports in `.env` if 6379 or 3000 are taken.
 
 ```
-git clone https://github.com/DevAnuragT/reachable.git -b faultline faultline && cd faultline
+git clone https://github.com/DevAnuragT/faultline.git -b faultline faultline && cd faultline
 cp .env.example .env          # local defaults; add OPENROUTER_API_KEY, GEMINI_API_KEY or ANTHROPIC_API_KEY for the agent (optional)
 make venv                     # Python virtualenv with pinned dependencies
 make test                     # 23 tests against the local FalkorDB (needs `make up` first)

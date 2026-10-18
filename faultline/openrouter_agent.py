@@ -31,7 +31,7 @@ def tool_schema(method) -> dict:
 class OpenRouterChat:
     def __init__(self, box, system: str, model: str | None = None) -> None:
         self.client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=config.OPENROUTER_API_KEY, timeout=90.0, max_retries=1,
-                             default_headers={"HTTP-Referer": "https://github.com/DevAnuragT/reachable", "X-Title": "Faultline"})
+                             default_headers={"HTTP-Referer": "https://github.com/DevAnuragT/faultline", "X-Title": "Faultline"})
         self.model = model or config.OPENROUTER_MODEL
         self.tools = {m.__name__: m for m in box.tools()}
         self.schemas = [tool_schema(m) for m in box._raw_tools()]

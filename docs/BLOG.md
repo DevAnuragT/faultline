@@ -1,6 +1,6 @@
 # Faultline: letting the trace graph decide what to break, what to fix, and how to prove it
 
-*Anurag Thakur · Graph Hacks, Oct 2026 · Track 1: Agents That Act on Connected Data · [repository](https://github.com/DevAnuragT/reachable)*
+*Anurag Thakur · Graph Hacks, Oct 2026 · Track 1: Agents That Act on Connected Data · [repository](https://github.com/DevAnuragT/faultline)*
 
 ## The problem
 
